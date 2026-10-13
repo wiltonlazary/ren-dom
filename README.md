@@ -1,6 +1,6 @@
 # ren-dom
 
-The fine-grained DOM renderer for [ren-core](../../../ren-core/wtree/_repo_): `$dom`
+The fine-grained DOM renderer for [ren-core](https://github.com/wiltonlazary/ren-core): `$dom`
 renders into the light DOM and `$shadow` into a shadow root. Both are a ren-core
 `Host` (`ren-core/host`). Bindings write the DOM directly in the Render phase;
 there is no virtual DOM and no diff beyond each property's previous value.
@@ -460,8 +460,8 @@ npm test           # declarations, tsc --checkJs --strict, the TypeScript consum
 
 ## Benchmarks
 
-The [ren-bench market suite](../../../ren-bench/wtree/_repo_/bench/market/README.md)
+The [ren-bench market suite](https://github.com/wiltonlazary/ren-bench/blob/main/bench/market/README.md)
 owns the keyed table comparison, pinned competitors and current results. It
 loads ren-dom and ren-core through their public package entries. The
-[UI suite](../../../ren-bench/wtree/_repo_/bench/ui/README.md) measures worker
+[UI suite](https://github.com/wiltonlazary/ren-bench/blob/main/bench/ui/README.md) measures worker
 mode and disposal on the DOM and Skia. Run benchmark commands from ren-bench.

@@ -1,0 +1,41 @@
+{
+  "name": "ren-dom",
+  "version": "0.1.0",
+  "description": "The fine-grained DOM renderer for ren-core: light DOM (`$dom`) and shadow root (`$shadow`) hosts, event delegation and compiled template cloning.",
+  "type": "module",
+  "private": true,
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.15"
+  },
+  "files": [
+    "src",
+    "types",
+    "README.md"
+  ],
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "scripts": {
+    "types": "node scripts/types.mjs",
+    "check": "tsc -p tsconfig.json",
+    "test": "node scripts/types.mjs && tsc -p tsconfig.json && tsc -p test/types/tsconfig.json && node --import ren-core/loader --test test/*.test.js test/*.test.jsx && node --import ren-core/compiled --test test/*.test.jsx",
+    "prepare": "node scripts/types.mjs",
+    "prepack": "node scripts/types.mjs"
+  },
+  "dependencies": {
+    "ren-core": "file:../../../ren-core/wtree/_repo_"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "happy-dom": "20.14.5",
+    "ren-canv": "file:../../../ren-canv/wtree/_repo_",
+    "rrx-core": "file:../../../rrx-core/wtree/_repo_",
+    "typescript": "7.0.2"
+  }
+}

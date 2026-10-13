@@ -1,0 +1,8 @@
+{
+  ".": {
+    "$dom": "function",
+    "$shadow": "function",
+    "color": "function",
+    "render": "function"
+  }
+}

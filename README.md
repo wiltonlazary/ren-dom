@@ -7,8 +7,9 @@ there is no virtual DOM and no diff beyond each property's previous value.
 Plain JavaScript with JSDoc types, strict `tsc` checking and generated
 declarations.
 
-The package is named `ren-dom`, and `package.json`
-is `private`. Its one runtime dependency is ren-core (linked from the sibling
+The package is published on npm as `@maxenve/ren-dom` under the MIT license;
+install it under its import name: `npm install ren-dom@npm:@maxenve/ren-dom`.
+Its one runtime dependency is ren-core (linked from the sibling
 checkout, `file:../../../ren-core/wtree/_repo_`), which brings rrx-core. It can share a
 page with ren-skia and ren-three: each application root has its own renderer.
 

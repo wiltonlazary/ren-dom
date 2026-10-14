@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "description": "The fine-grained DOM renderer for ren-core: light DOM (`$dom`) and shadow root (`$shadow`) hosts, event delegation and compiled template cloning.",
   "type": "module",
-  "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wiltonlazary/ren-dom.git"
+  },
+  "homepage": "https://github.com/wiltonlazary/ren-dom#readme",
+  "bugs": {
+    "url": "https://github.com/wiltonlazary/ren-dom/issues"
+  },
   "sideEffects": false,
   "engines": {
     "node": ">=22.15"

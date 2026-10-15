@@ -23,7 +23,7 @@ rrx-core comes through ren-core (and is linked as a devDependency for the tests)
 - Checkout: `wtree/_repo_` (branch `main`); feature branches are sibling
   worktrees under `wtree/<name>`, each with its own build directory
   `build/<name>_<version>` and its own `artifact` link to it.
-- Build output: `build/_repo__0.1.1`, reached through the ignored `artifact`
+- Build output: `build/_repo__0.1.2`, reached through the ignored `artifact`
   link for library scratch (`artifact/tmp/<task>/`). Benchmark bundles,
   Chrome profiles and recorded readings belong to ren-bench.
 - `types/` is generated (`scripts/types.mjs`) and ignored.

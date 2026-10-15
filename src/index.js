@@ -953,7 +953,10 @@ function primitive(node, role, name, value) {
     }
     case 'trap':
       // A focus trap: Tab cycles inside it while the focus is inside.
-      if (node[TRAP] === undefined) node.addEventListener('keydown', trapped);
+      if (node[TRAP] === undefined) {
+        node.addEventListener('keydown', trapped);
+        traps++;
+      }
       node[TRAP] = !!value;
       return true;
     case 'axis':
@@ -1522,6 +1525,39 @@ class Mirror {
 
 /** A primitive's focus trap (its `trap`). */
 const TRAP = Symbol('ren.trap');
+
+/** How many elements were ever made traps: none, and a removal checks no focus. */
+let traps = 0;
+
+/**
+ * The focus trap a removal takes the focus from: the nearest trap around
+ * `parent` when `child` is or holds the focused element, else null.
+ * @param {any} parent @param {any} child
+ */
+function trapAround(parent, child) {
+  const active = parent.getRootNode?.().activeElement;
+  if (active == null || !(child === active || child.contains?.(active))) return null;
+  for (let n = parent; n != null; n = n.parentNode) if (n[TRAP] === true) return n;
+  return null;
+}
+
+/**
+ * The focus goes back into a trap whose focused element was removed: its
+ * first focusable, else the trap itself when it takes the focus (a
+ * `tabindex`), as the canvases do; unless something focused another
+ * element meanwhile.
+ * @param {any} trap
+ */
+function refocus(trap) {
+  if (!trap.isConnected) return;
+  // The document's: a shadow root's is null while the focus is anywhere outside it.
+  const doc = trap.ownerDocument;
+  const active = doc.activeElement;
+  if (active != null && active !== doc.body && active !== doc.documentElement) return;
+  const first = focusables(trap)[0];
+  if (first !== undefined) first.focus();
+  else if (trap.hasAttribute('tabindex')) trap.focus();
+}
 
 /**
  * Tab inside a trap: from its last focusable to its first, Shift+Tab from
@@ -2967,10 +3003,13 @@ function make(document, options, mode) {
     },
     remove(parent, child) {
       if (child.parentNode !== parent) return;
+      // The focus trap around a removed focused element takes the focus back.
+      const trap = traps > 0 ? trapAround(parent, child) : null;
       release(parent, child, child);
       if (flow !== null) unplace(parent, child);
       if (mirrored && child[MIRROR] !== undefined && child[MIRROR].box.parentNode === parent) parent.removeChild(child[MIRROR].box);
       parent.removeChild(child);
+      if (trap !== null) refocus(trap);
     },
     marker: () => doc.createTextNode(''),
     parent: node => node.parentNode,

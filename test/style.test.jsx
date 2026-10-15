@@ -503,6 +503,39 @@ describe('ren dom portable style', () => {
     assert.ok(!tab(false), 'outside it, the browser tabs');
   });
 
+  it('takes the focus back into a trap when the focused element inside it is removed', () => {
+    const { container, document, window } = setup();
+    const root = $root('trap');
+    const shown = $signal(root, true);
+    /** @type {string[]} */
+    const keys = [];
+    render(() => (
+      <View>
+        <Action text="out" />
+        <View trap onKey={(/** @type {any} */ e) => keys.push(e.key)}>
+          <Action text="first" />
+          {() => ($read(shown) ? <Action text="swap" /> : <Label text="swapped" />)}
+        </View>
+        <View trap tabIndex={-1}>
+          {() => ($read(shown) ? <Action text="only" /> : null)}
+        </View>
+      </View>
+    ), container, { root });
+    const [, first, swap] = [...container.querySelectorAll('button')];
+    const [, trap, bare] = [...container.querySelectorAll('[data-ren="View"]')];
+    swap.focus();
+    $write(shown, false);
+    assert.ok(document.activeElement === first, "the trap's first focusable");
+    document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.deepEqual(keys, ['Escape'], 'its keys still reach the trap');
+    assert.ok(trap.contains(document.activeElement));
+    $write(shown, true);
+    container.querySelectorAll('button')[3].focus();
+    $write(shown, false);
+    assert.ok(document.activeElement === bare, 'none inside: the trap itself, which takes the focus');
+    $dispose(root);
+  });
+
   it('focuses the first or last focusable inside a trap with $focus, as Tab cycles', () => {
     const { container, document } = setup();
     /** @type {any} */

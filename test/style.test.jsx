@@ -6,7 +6,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window as HappyWindow } from 'happy-dom';
 import { $root, $signal, $read, $write, $dispose } from 'rrx-core';
-import { View, Layout, Scroll, Label, Edit, Action, Shape, Image, Root, Recover, $focus } from 'ren-core';
+import { View, Layout, Scroll, Label, Edit, Action, Shape, Image, Root, Recover, $focus, $active } from 'ren-core';
 import { render, $dom } from 'ren-dom';
 
 /** The happy-dom windows this file's tests open, each closed after its test (its window.close() frees nothing). @type {HappyWindow[]} */
@@ -501,6 +501,37 @@ describe('ren dom portable style', () => {
     assert.equal(document.activeElement, b, 'and back');
     out.focus();
     assert.ok(!tab(false), 'outside it, the browser tabs');
+  });
+
+  it('hands a focus ring on (ring false) to the element around it marked inner and those inside it marked outer, through the sheet', () => {
+    const { container, document } = setup();
+    /** @type {any} */
+    let handed = null;
+    const Page = () => {
+      handed = $signal($active(), true);
+      return (
+        <View>
+          <View style={{ ring: 'inner', radius: 6 }}>
+            <Edit label="name" value="" style={() => ($read(handed) ? { ring: false } : {})} />
+          </View>
+          <Action style={{ ring: false }}>
+            <View style={{ ring: 'outer', radius: 8 }} />
+          </Action>
+        </View>
+      );
+    };
+    const root = Root({ id: 'rings', target: container, renderer: $dom(document), children: <Page /> });
+    const marked = () => [...container.querySelectorAll('[data-ren-ring]')].map(n => `${n.getAttribute('data-ren')}:${n.getAttribute('data-ren-ring')}`);
+    assert.deepEqual(marked(), ['View:inner', 'Edit:false', 'Action:false', 'View:outer']);
+    assert.equal(container.querySelector('[data-ren="Edit"]').style.getPropertyValue('ring'), '', 'no CSS property of that name');
+    const sheet = container.querySelector('style[data-ren-style]').textContent;
+    assert.match(sheet, /\[data-ren-ring="false"\]:is\(:focus, :focus-visible\)[^{]*\{ outline: none; \}/);
+    assert.match(sheet, /\[data-ren-ring="inner"\]:has\(\[data-ren-ring="false"\]:focus-visible\):not\(:has\(\[data-ren-ring="false"\]:focus-visible \[data-ren-ring="outer"\]\)\):not\(:has\(\[data-ren-ring="inner"\] \[data-ren-ring="false"\]:focus-visible\)\)[^{]*\{ outline: auto; outline-offset: 0; \}/);
+    assert.ok(!/:has\([^)]*:has\(/.test(sheet), 'no :has inside :has, which CSS refuses');
+    assert.match(sheet, /\[data-ren-ring="false"\]:focus-visible \[data-ren-ring="outer"\][^{]*\{ outline: auto; outline-offset: 0; \}/);
+    $write(handed, false);
+    assert.deepEqual(marked(), ['View:inner', 'Action:false', 'View:outer'], 'a style without it gives the ring back');
+    $dispose(root);
   });
 
   it('takes the focus back into a trap when the focused element inside it is removed', () => {

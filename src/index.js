@@ -824,6 +824,7 @@ function css(v, role) {
       case 'hover':
       case 'press':
       case 'focus':
+      case 'ring':
         break;
       default:
         if (LENGTHS[key] !== undefined) out[LENGTHS[key]] = px(x);
@@ -1814,6 +1815,13 @@ function sheet(id, shadow, extra) {
   // (Chrome 121+), and theirs is the exact one.
   text += `@supports not selector(::-webkit-scrollbar) {\n${rule('[data-ren="Scroll"]', 'scrollbar-width: var(--ren-bars, var(--ren-scrollbar, thin)); scrollbar-color: var(--ren-thumb, var(--ren-muted)) var(--ren-track, var(--ren-soft));')}}\n`;
   text += rule(':is([data-ren="Image"], [data-ren="Shape"])', 'width: var(--ren-media); height: var(--ren-media);');
+  // A focus ring handed on (ring false): none on the focused element; the browser's ring on those inside it
+  // marked outer, or, with none, on the nearest element around it marked inner, along their corners.
+  // (No :has inside :has, which CSS refuses: the item marked outer is excluded as a descendant of the focus.)
+  const handing = '[data-ren-ring="false"]:focus-visible';
+  text += rule('[data-ren-ring="false"]:is(:focus, :focus-visible)', 'outline: none;');
+  text += rule(`[data-ren-ring="inner"]:has(${handing}):not(:has(${handing} [data-ren-ring="outer"])):not(:has([data-ren-ring="inner"] ${handing}))`, 'outline: auto; outline-offset: 0;');
+  text += rule(`${handing} [data-ren-ring="outer"]`, 'outline: auto; outline-offset: 0;');
   if (extra !== '') text += shadow ? `${extra}\n` : `@scope (${host}) to ([data-ren-root]) {\n${extra}\n}\n`;
   return text;
 }
@@ -2435,6 +2443,10 @@ function make(document, options, mode) {
     const s = value != null && typeof value === 'object' ? value : {};
     const before = node[LOOK];
     node[LOOK] = s;
+    // Its focus ring, for the sheet: handed on (false), or drawn for an inner or an outer focus.
+    const ring = s.ring === false ? 'false' : s.ring === 'inner' || s.ring === 'outer' ? s.ring : null;
+    if (ring !== null) node.setAttribute('data-ren-ring', ring);
+    else if (before !== undefined && before.ring !== undefined) node.removeAttribute('data-ren-ring');
     const out = css(flow === null ? s : painted(s, role), role);
     const style = node.style;
     /** @type {Record<string, string> | undefined} */

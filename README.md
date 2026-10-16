@@ -75,7 +75,13 @@ content centered along it as the canvases lay it out; Labels keep line breaks an
 least), so it holds without the sheet; the rest is the browser's own CSS,
 grid included. The
 `hover`, `press` and `focus` styles become one class per distinct set of
-rules in the host's own stylesheet (`:hover`, `:active`, `:focus`). A style
+rules in the host's own stylesheet (`:hover`, `:active`, `:focus`). A
+style's `ring` becomes the element's `data-ren-ring`, which the sheet
+reads: an element whose ring is false shows no outline when focused, and
+the browser's ring (`outline: auto`, along the corners) goes, while it
+has `:focus-visible`, on those inside it marked `outer`, or, with none,
+on the nearest element around it marked `inner`; without the sheet each
+keeps its own. A style
 overrides the shorthand props that set the same thing, and gives them back
 when it stops. Names outside the vocabulary are written as CSS: the DOM
 only. ren-skia and ren-three draw the same style through ren-canv.

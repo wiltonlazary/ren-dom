@@ -945,12 +945,23 @@ describe('ren dom portable style', () => {
     assert.equal(container.firstChild.getAttribute('datetime'), '2026-09-27T10:00Z');
   });
 
-  it('passes names outside the vocabulary through as CSS, the DOM only', () => {
+  it('writes the portable cursor, and passes names outside the vocabulary through as CSS, the DOM only', () => {
     const { container } = setup();
     render(() => <Label text="x" style={{ cursor: 'pointer', letterSpacing: 2 }} />, container);
     const label = declared(container.firstChild);
     assert.equal(label.cursor, 'pointer');
     assert.equal(label['letter-spacing'], '2px');
+  });
+
+  it('writes a hover or press style\'s cursor in its state rule, as the canvases show it', () => {
+    const { container, document } = setup();
+    render(() => <View style={{ cursor: 'grab', hover: { cursor: 'pointer' }, press: { cursor: 'grabbing' } }} />, container);
+    const view = container.firstChild;
+    assert.equal(declared(view).cursor, 'grab');
+    const name = view.getAttribute('data-ren-state');
+    const sheet = document.querySelector('style[data-ren-states]').textContent;
+    assert.match(sheet, new RegExp(`\\.${name}:hover \\{ cursor: pointer !important \\}`));
+    assert.match(sheet, new RegExp(`\\.${name}:active \\{ cursor: grabbing !important \\}`));
   });
 
   it("sets an application root's text tokens: the leading without a unit", () => {

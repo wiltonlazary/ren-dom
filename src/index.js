@@ -2104,7 +2104,9 @@ function make(document, options, mode) {
       const t = path[0] ?? e.target;
       const loose = t === d.body || t === d.documentElement || t === d;
       if (loose ? anchor !== null && whose(anchor, node) < 0 : whose(t, node) < 0) return;
-      const opted = (anchor !== null && whose(anchor, node) > 0 ? optedIn(anchor, node) : null) ?? (loose ? null : optedIn(t, node));
+      // The selection may lie in a root nested in this one while the focus is this one's (a drag over a nested root's text
+      // leaves the focus where it was): its opted-in text is selected all the same.
+      const opted = (anchor !== null && around(node, anchor) ? optedIn(anchor, node) : null) ?? (loose ? null : optedIn(t, node));
       if (opted !== null && selection !== null) {
         const range = d.createRange();
         range.selectNodeContents(opted);

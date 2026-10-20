@@ -288,6 +288,38 @@ describe('ren dom behavior', () => {
     assert.equal(press(document.body, 'a'), false, 'the guard goes with the root');
   });
 
+  it("selects a nested root's opted-in text holding the selection while the focus is the parent's", () => {
+    const { document, page } = setup();
+    const root = Root({
+      id: 'shell',
+      target: page,
+      renderer: $dom(document),
+      children: (
+        <View>
+          <button>focused</button>
+          <Root id="demo" renderer={$dom(document)}>
+            {() => (
+              <View style={{ select: 'text' }}>
+                <Label text="nested " />
+                <Label text="code" />
+              </View>
+            )}
+          </Root>
+        </View>
+      ),
+    });
+    const opted = page.querySelector('[data-ren-root="demo"] [data-ren="View"]');
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(opted.firstChild.firstChild, 1);
+    range.setEnd(opted.firstChild.firstChild, 3);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    assert.equal(press(page.querySelector('[data-ren-root="shell"] button'), 'a'), true);
+    assert.equal(selection.toString(), opted.textContent, "the nested root's opted-in text, all of it");
+    $dispose(root);
+  });
+
   it('leaves Ctrl or Cmd+A to a page, to selectAll on, and to a selection in another root', () => {
     const { document, page } = setup();
     const paged = Root({ id: 'page', target: page, renderer: $dom(document, { behavior: 'page' }), children: <Label text="page text" /> });

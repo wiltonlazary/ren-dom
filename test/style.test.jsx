@@ -960,8 +960,9 @@ describe('ren dom portable style', () => {
     assert.equal(declared(view).cursor, 'grab');
     const name = view.getAttribute('data-ren-state');
     const sheet = document.querySelector('style[data-ren-states]').textContent;
-    assert.match(sheet, new RegExp(`\\.${name}:hover \\{ cursor: pointer !important \\}`));
-    assert.match(sheet, new RegExp(`\\.${name}:active \\{ cursor: grabbing !important \\}`));
+    // Each also hands its cursor down to the opted-in text inside (`--ren-cursor`).
+    assert.match(sheet, new RegExp(`\\.${name}:hover \\{ cursor: pointer !important; --ren-cursor: pointer !important \\}`));
+    assert.match(sheet, new RegExp(`\\.${name}:active \\{ cursor: grabbing !important; --ren-cursor: grabbing !important \\}`));
   });
 
   it("sets an application root's text tokens: the leading without a unit", () => {

@@ -837,8 +837,14 @@ function css(v, role) {
       case 'select':
         out['user-select'] = x === 'none' ? 'none' : 'text';
         out['-webkit-user-select'] = out['user-select'];
-        // Opted-in text shows the I-beam over it, under a root whose loose text shows none, unless the style sets a cursor.
-        if (x !== 'none' && v.cursor == null) out.cursor = 'auto';
+        // Opted-in text shows the I-beam over it, under a root whose loose text shows none, unless the style sets a cursor;
+        // inside an element whose style set one (a press target's hand), that one.
+        if (x !== 'none' && v.cursor == null) out.cursor = 'var(--ren-cursor, auto)';
+        break;
+      case 'cursor':
+        // Its own, and handed down to the opted-in text inside (CSS's cursor is inherited, but that text sets its own).
+        out.cursor = String(x);
+        out['--ren-cursor'] = String(x);
         break;
       case 'position':
         if (x === 'absolute' || x === 'relative' || x === 'sticky' || x === 'fixed') out.position = x;

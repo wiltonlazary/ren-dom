@@ -6,7 +6,7 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window as HappyWindow } from 'happy-dom';
-import { View, Label, Edit, Root, $dispose } from 'ren-core';
+import { View, Label, Edit, Action, Root, $dispose } from 'ren-core';
 import { $dom, $shadow } from 'ren-dom';
 
 /** The happy-dom windows this file's tests open, each closed after its test (its window.close() frees nothing). @type {HappyWindow[]} */
@@ -162,11 +162,16 @@ describe('ren dom behavior', () => {
           <Label text="a" style={{ select: 'text' }} />
           <Label text="b" style={{ select: 'text', cursor: 'pointer' }} />
           <Label text="c" style={{ select: 'none' }} />
+          <Action label="go" style={{ cursor: 'pointer' }}>
+            <Label text="d" style={{ select: 'text' }} />
+          </Action>
         </View>
       ),
     });
     const [a, b, c] = [...page.querySelectorAll('[data-ren="Label"]')].map(declared);
-    assert.deepEqual([a['user-select'], a.cursor], ['text', 'auto']);
+    // The I-beam, or inside an element whose style set a cursor (a press target's hand) that one.
+    assert.deepEqual([a['user-select'], a.cursor], ['text', 'var(--ren-cursor, auto)']);
+    assert.equal(declared(page.querySelector('[data-ren="Action"]'))['--ren-cursor'], 'pointer', 'a style\'s cursor is handed down to opted-in text');
     assert.deepEqual([b['user-select'], b.cursor], ['text', 'pointer']);
     assert.deepEqual([c['user-select'], c.cursor], ['none', undefined]);
     $dispose(root);

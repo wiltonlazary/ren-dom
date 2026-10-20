@@ -212,7 +212,10 @@ describe('ren dom behavior', () => {
     const menu = make({ like: 'app', menu: true }, 'menu');
     assert.deepEqual(menus('menu'), [false, false, false, false, true], 'menu alone over an app');
     $dispose(menu);
-    assert.equal(heard.length, 15);
+    const pageStrict = make({ like: 'page', editMenu: false }, 'pagestrict');
+    assert.deepEqual(menus('pagestrict'), [false, false, true, true, true], "a page with editMenu false: the browser's outside fields, none in them");
+    $dispose(pageStrict);
+    assert.equal(heard.length, 20);
   });
 
   it('leaves a nested root its own menu, and gives its host element back what the parent turned off', () => {

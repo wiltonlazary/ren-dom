@@ -2067,16 +2067,16 @@ function make(document, options, mode) {
     e.preventDefault();
   };
   /**
-   * The browser's context menu, with the behavior's `menu` off: cancelled
-   * over the root's nodes, but in a field while `editMenu` keeps it there
-   * (paste, spelling). A nested root's nodes are its own to decide; the
-   * handlers still hear the event.
+   * The browser's context menu, with the behavior's `menu` or `editMenu`
+   * off: in a field `editMenu` decides (paste, spelling), elsewhere `menu`.
+   * A nested root's nodes are its own to decide; the handlers still hear
+   * the event.
    * @param {any} e
    */
   const unmenu = e => {
     let n = e.target;
     if (n != null && n.nodeType !== 1) n = n.parentNode;
-    if ((behavior.editMenu && field(n)) || whose(n, e.currentTarget) < 0) return;
+    if (whose(n, e.currentTarget) < 0 || (field(n) ? behavior.editMenu : behavior.menu)) return;
     e.preventDefault();
   };
   /**
@@ -3021,7 +3021,7 @@ function make(document, options, mode) {
       if (count === 0) {
         for (const event of keys.keys()) target.addEventListener(event, dispatch, activeFor(event));
         target.addEventListener('dragstart', undrag);
-        if (!behavior.menu) target.addEventListener('contextmenu', unmenu);
+        if (!behavior.menu || !behavior.editMenu) target.addEventListener('contextmenu', unmenu);
         if (!behavior.selectAll) guards.set(target, unselect(target));
       }
       let attached = true;

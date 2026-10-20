@@ -7,9 +7,10 @@
 // and events. Bindings write the DOM directly in the Render phase; there is
 // no virtual DOM and no diff beyond each property's previous value.
 
-import { mount, skeleton, Theme, COLORS, UNITLESS, focusables, argb } from 'ren-core/host';
+import { mount, skeleton, Theme, COLORS, UNITLESS, focusables, argb, behaviorOf } from 'ren-core/host';
 
 /** @typedef {import('ren-core/host').Host} Host */
+/** @typedef {import('ren-core/host').Switches} Switches */
 
 const SVG = 'http://www.w3.org/2000/svg';
 const MATHML = 'http://www.w3.org/1998/Math/MathML';
@@ -409,13 +410,16 @@ const CONTAINER = `${BASE}display:flex;flex-direction:column;`;
 // A field's height and an Edit's entry width are the theme's (ren-canv's
 // defaults too), inline as the rest.
 const FIELD = `${BASE}min-height:var(--ren-field, 38px);`;
+// An Edit's text is selectable and shows the I-beam whatever its root's behavior (Safari types into no input
+// that cannot be selected); its style's own cursor or select wins.
+const ENTRY = 'user-select:text;-webkit-user-select:text;cursor:text;';
 const BASES = /** @type {Record<string, string>} */ ({
   View: CONTAINER,
   Layout: CONTAINER,
   // Room for its bar always, as the canvases keep it (the sheet makes it the theme's `bar` wide).
   Scroll: `${CONTAINER}overflow:auto;scrollbar-gutter:stable;`,
   Label: `${BASE}display:block;white-space:pre;`,
-  Edit: `${BASE}min-width:var(--ren-entry, 200px);min-height:var(--ren-field, 38px);`,
+  Edit: `${BASE}min-width:var(--ren-entry, 200px);min-height:var(--ren-field, 38px);${ENTRY}`,
   // An Action lays out what it holds as the canvases do (ren-canv lays it out
   // as a View): a column flex box, its content centered along it; a caption
   // alone centers the same way.
@@ -552,6 +556,8 @@ function autosize(node, value) {
     }
 }
 
+/** The input types that take typed text, as a selector list. */
+const TYPED_INPUTS = ['text', 'search', 'email', 'url', 'tel', 'password', 'number'].map(t => `[type="${t}" i]`).join(', ');
 /** Tags whose keys are typing. */
 const FIELDS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 /** Whether a key's target is a text field (`$keys`' `editable`). @param {any} t */
@@ -561,6 +567,52 @@ const around = (target, node) => {
   for (let n = node; n != null; n = n.parentNode ?? n.host) if (n === target) return true;
   return false;
 };
+
+/**
+ * Whose `n` is, walking out across shadow roots: 1 when it is in `top` with
+ * no other root's host element between them, -1 when another root holds it
+ * first (a nested one's own), 0 when no root does.
+ * @param {any} n @param {any} top
+ */
+const whose = (n, top) => {
+  for (; n != null; n = n.parentNode ?? n.host) {
+    if (n === top) return 1;
+    if (n.nodeType === 1 && n.hasAttribute('data-ren-root')) return -1;
+  }
+  return 0;
+};
+
+/**
+ * The outermost element around `n`, up to `top`, whose text is opted in to
+ * selection (its user-select is text, as the style `select: 'text'` writes):
+ * the first met, and those around it that are too. Null when none is.
+ * @param {any} n @param {any} top
+ */
+const optedIn = (n, top) => {
+  const view = n.ownerDocument?.defaultView;
+  /** @type {any} */
+  let opted = null;
+  for (; n != null && n !== top && n.nodeType !== 11; n = n.parentNode) {
+    if (n.nodeType !== 1) continue;
+    const text = (view?.getComputedStyle?.(n) ?? n.style).getPropertyValue('user-select') === 'text';
+    if (text) opted = n;
+    else if (opted !== null) break;
+  }
+  return opted;
+};
+
+/**
+ * What each switch of a behavior writes on the root's host element while
+ * off (inline, so it holds without the sheet), and the values a nested
+ * root's host element is given back while its parent's is off, so the
+ * parent's cascade stops at it: [switch, off, on].
+ */
+const SWITCHED = /** @type {[keyof Switches, Record<string, string>, Record<string, string>][]} */ ([
+  ['select', { 'user-select': 'none', '-webkit-user-select': 'none' }, { 'user-select': 'text', '-webkit-user-select': 'text' }],
+  // Loose text shows no I-beam; an element with its own cursor keeps it.
+  ['textCursor', { cursor: 'default' }, { cursor: 'auto' }],
+  ['callout', { '-webkit-touch-callout': 'none', '-webkit-tap-highlight-color': 'transparent' }, { '-webkit-touch-callout': 'default', '-webkit-tap-highlight-color': 'initial' }],
+]);
 
 /** True for a CSS family list naming monospace (as the canvases read it). @param {string} family */
 const monospaced = family => family.split(',').some(f => f.trim().replace(/^["']|["']$/g, '').toLowerCase() === 'monospace');
@@ -582,7 +634,7 @@ const POSITIONED_BASES = /** @type {Record<string, string>} */ ({
   Layout: POSITIONED,
   Scroll: `${POSITIONED}overflow:auto;`,
   Label: `${POSITIONED}white-space:pre;`,
-  Edit: POSITIONED,
+  Edit: `${POSITIONED}${ENTRY}`,
   Action: `${POSITIONED}white-space:pre;`,
   Image: POSITIONED,
   Shape: POSITIONED,
@@ -784,6 +836,9 @@ function css(v, role) {
         break;
       case 'select':
         out['user-select'] = x === 'none' ? 'none' : 'text';
+        out['-webkit-user-select'] = out['user-select'];
+        // Opted-in text shows the I-beam over it, under a root whose loose text shows none, unless the style sets a cursor.
+        if (x !== 'none' && v.cursor == null) out.cursor = 'auto';
         break;
       case 'position':
         if (x === 'absolute' || x === 'relative' || x === 'sticky' || x === 'fixed') out.position = x;
@@ -1755,6 +1810,7 @@ function preventions(value) {
  * @property {ArrayBuffer | Uint8Array | string | URL=} font The typeface the root's text is set in: the bytes or the URL of a font file (the one ren-skia and ren-three are given, so the DOM sets text as they do). Added to the document's fonts as `ren-<id>`; the root's text then has no kerning or ligatures, as the canvases draw it.
  * @property {ArrayBuffer | Uint8Array | string | URL=} mono The monospace typeface text whose `fontFamily` names monospace is set in (ren-skia's and ren-three's `mono`): `ren-<id>-mono`, through `--ren-mono`.
  * @property {Arranger=} layout Lay the primitives out with a layout engine instead of the browser: ren-canv's `Flow` (Taffy by default, in this thread or a layout worker). The engine places each primitive's element (absolutely, at its box) after every flush; the browser still paints them.
+ * @property {import('ren-core/host').Behavior=} behavior As an application ('app', the default: loose text not selectable and with no I-beam, Ctrl or Cmd+A only in a field or `select: 'text'`, no browser menu but in a field, no touch callout) or a page ('page'), or `like` one with switches of its own (ren-core's `behaviorOf`).
  */
 
 /**
@@ -1784,9 +1840,9 @@ function preventions(value) {
  * The renderer's stylesheet: primitives themed by the host's custom
  * properties. Selectors stop at nested roots (`:not(… [data-ren-root] *)`),
  * so a root never styles another one inside it.
- * @param {string} id @param {boolean} shadow @param {string} extra
+ * @param {string} id @param {boolean} shadow @param {string} extra @param {Switches} behavior
  */
-function sheet(id, shadow, extra) {
+function sheet(id, shadow, extra, behavior) {
   const host = shadow ? ':host' : `[data-ren-root="${id}"]`;
   const within = shadow ? '' : `${host} `;
   const outside = shadow ? ':not([data-ren-root] *)' : `:not(${host} [data-ren-root] *)`;
@@ -1797,6 +1853,9 @@ function sheet(id, shadow, extra) {
   text += rule('[data-ren="Edit"]', 'font: inherit; background: var(--ren-paper); color: var(--ren-ink); border: 1px solid var(--ren-border); border-radius: var(--ren-radius); min-height: var(--ren-field); min-width: var(--ren-entry); padding: 0 var(--ren-inset); resize: none;');
   text += `${within}[data-ren="Edit"]${outside}::placeholder { color: var(--ren-placeholder, var(--ren-muted)); }\n`;
   text += rule('[data-ren="Edit"]:disabled', 'background: var(--ren-soft); color: var(--ren-muted);');
+  // The text fields the application writes, as an Edit (inline on it): selectable, with the I-beam, where loose text is not.
+  const entry = [behavior.select ? '' : 'user-select: text; -webkit-user-select: text;', behavior.textCursor ? '' : 'cursor: text;'].filter(d => d !== '').join(' ');
+  if (entry !== '') text += rule(`:is(textarea, input:is(:not([type]), ${TYPED_INPUTS}), [contenteditable]:not([contenteditable="false" i]))`, entry);
   // An Edit's mirror (its runs) as the theme sets the field, until it copies the field's computed style.
   text += rule('[data-ren-mirror]', 'font: inherit; color: var(--ren-ink); border-width: 1px; border-radius: var(--ren-radius); padding: 0 var(--ren-inset);');
   text += `${within}[data-ren-runs]${outside}::selection { color: transparent; -webkit-text-fill-color: transparent; }\n`;
@@ -1835,6 +1894,10 @@ function sheet(id, shadow, extra) {
 function make(document, options, mode) {
   let doc = document;
   const kind = mode === null ? 'dom' : 'shadow';
+  /** As an application or a page (the `behavior` option): each switch on its own. */
+  const behavior = behaviorOf(options.behavior);
+  /** The switches off that write on the host element, whose cascade a nested root's host element stops. */
+  const switched = SWITCHED.filter(([key]) => !behavior[key]);
   let theme = new Theme(options.theme);
   /** Writes the theme's tokens on the root's host element, as `--ren-<token>` custom properties. @param {any} host */
   const tokens = host => {
@@ -1946,6 +2009,8 @@ function make(document, options, mode) {
   const runs = new Map();
   /** Delegation roots and how many attached each. @type {Map<any, number>} */
   const roots = new Map();
+  /** The select-all guard of each delegation root, to remove with it. @type {Map<any, () => void>} */
+  const guards = new Map();
   /** The key an event carries: the last root this host dispatched it to. */
   const walked = Symbol('ren.walked');
   /** @param {any} e */
@@ -2001,6 +2066,47 @@ function make(document, options, mode) {
     for (; n != null && n !== top; n = n.parentNode) if (n[DRAGS] === true || (n.nodeType === 1 && n.getAttribute('draggable') === 'true')) return;
     e.preventDefault();
   };
+  /**
+   * The browser's context menu, with the behavior's `menu` off: cancelled
+   * over the root's nodes, but in a field while `editMenu` keeps it there
+   * (paste, spelling). A nested root's nodes are its own to decide; the
+   * handlers still hear the event.
+   * @param {any} e
+   */
+  const unmenu = e => {
+    let n = e.target;
+    if (n != null && n.nodeType !== 1) n = n.parentNode;
+    if ((behavior.editMenu && field(n)) || whose(n, e.currentTarget) < 0) return;
+    e.preventDefault();
+  };
+  /**
+   * Ctrl or Cmd+A, with the behavior's `selectAll` off, for a key of the
+   * root (as `$keys` hears it: focused in it, or nothing focused while the
+   * selection is in it or in no root): a field selects its own text (the
+   * browser's); else the text opted in (`select: 'text'`) around the
+   * selection or the focus is selected, and nothing else is.
+   * @param {any} node a delegation root
+   */
+  const unselect = node =>
+    rooted(node, (e, path) => {
+      if ((e.key !== 'a' && e.key !== 'A') || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.defaultPrevented || e.editable) return;
+      const d = node.ownerDocument ?? doc;
+      const top = typeof node.getRootNode === 'function' ? node.getRootNode() : d;
+      // A shadow root's own selection where the browser has one (the document's shows its host).
+      const selection = (typeof top.getSelection === 'function' ? top : d).getSelection?.() ?? null;
+      const anchor = selection?.anchorNode ?? null;
+      const t = path[0] ?? e.target;
+      const loose = t === d.body || t === d.documentElement || t === d;
+      if (loose ? anchor !== null && whose(anchor, node) < 0 : whose(t, node) < 0) return;
+      const opted = (anchor !== null && whose(anchor, node) > 0 ? optedIn(anchor, node) : null) ?? (loose ? null : optedIn(t, node));
+      if (opted !== null && selection !== null) {
+        const range = d.createRange();
+        range.selectNodeContents(opted);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      e.preventDefault();
+    });
   /** @param {string} event */
   const keyOf = event => {
     let key = keys.get(event);
@@ -2058,8 +2164,9 @@ function make(document, options, mode) {
    * whether its target (inside a shadow root too) is a text field: an input,
    * textarea, select or contenteditable element. In a shadow root the
    * document cannot see into (a closed one hides its nodes from the path
-   * and retargets to its host), the root's own keydown notes the path first.
-   * @param {any} node the container @param {(event: any) => void} handler
+   * and retargets to its host), the root's own keydown notes the path first;
+   * the handler is given that path.
+   * @param {any} node the container @param {(event: any, path: any[]) => void} handler
    */
   const rooted = (node, handler) => {
     const d = node.ownerDocument ?? doc;
@@ -2075,7 +2182,7 @@ function make(document, options, mode) {
       const path = inner.get(e) ?? e.composedPath();
       if (t === d.body || t === d.documentElement || t === d || path.includes(node)) {
         e.editable = field(path[0] ?? t);
-        handler(e);
+        handler(e, path);
       }
     };
     shadow?.addEventListener('keydown', note);
@@ -2914,6 +3021,8 @@ function make(document, options, mode) {
       if (count === 0) {
         for (const event of keys.keys()) target.addEventListener(event, dispatch, activeFor(event));
         target.addEventListener('dragstart', undrag);
+        if (!behavior.menu) target.addEventListener('contextmenu', unmenu);
+        if (!behavior.selectAll) guards.set(target, unselect(target));
       }
       let attached = true;
       return () => {
@@ -2925,6 +3034,9 @@ function make(document, options, mode) {
           roots.delete(target);
           for (const event of keys.keys()) target.removeEventListener(event, dispatch);
           target.removeEventListener('dragstart', undrag);
+          target.removeEventListener('contextmenu', unmenu);
+          guards.get(target)?.();
+          guards.delete(target);
           // A host without a root put its state sheet in the document: its
           // last view gone, the sheet goes too (a root's goes on close).
           if (roots.size === 0 && !opened && stateSheet !== null) {
@@ -3006,6 +3118,9 @@ function make(document, options, mode) {
     insert(parent, child, before) {
       if (parent[LEAF] === true) return;
       parent.insertBefore(child, before);
+      // A nested root's host element: what this root's behavior turns off stops at it, unless it sets its own.
+      if (switched.length > 0 && child.nodeType === 1 && child.hasAttribute('data-ren-root'))
+        for (const [, , on] of switched) for (const name in on) if (child.style.getPropertyValue(name) === '') child.style.setProperty(name, on[name]);
       if (parent[CHOSEN] !== undefined || parent.localName === 'optgroup') choose(selectOf(parent));
       if (flow !== null) place(parent, child, before);
       // An Edit's mirror follows it, right after it.
@@ -3042,7 +3157,8 @@ function make(document, options, mode) {
       host.setAttribute('data-ren-root', id);
       tokens(host);
       typeset(host, id);
-      const text = options.styles === false ? '' : sheet(id, mode !== null, typeof options.styles === 'string' ? options.styles : '');
+      for (const [, off] of switched) for (const name in off) host.style.setProperty(name, off[name]);
+      const text = options.styles === false ? '' : sheet(id, mode !== null, typeof options.styles === 'string' ? options.styles : '', behavior);
       if (mode === null) {
         container = host;
         if (text !== '') {
@@ -3090,6 +3206,7 @@ function make(document, options, mode) {
       for (const key in theme) element.style.removeProperty(`--ren-${key}`);
       element.style.removeProperty('--ren-scrollbar');
       for (const name of ['font-family', '--ren-mono', 'font-kerning', 'font-variant-ligatures']) if (options.font != null || options.mono != null) element.style.removeProperty(name);
+      for (const [, off] of switched) for (const name in off) element.style.removeProperty(name);
       for (const face of faces) doc.fonts?.delete(face);
       faces = [];
       style = adopted = null;

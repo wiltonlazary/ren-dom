@@ -353,7 +353,7 @@ describe('ren-core event delegation', () => {
     document.body.appendChild(outside);
     press(outside, 'c');
     assert.equal(seen.length, 4, 'a key focused outside the root is not its');
-    assert.equal(t.on(document, 'keydown'), 1);
+    assert.equal(t.on(document, 'keydown'), 2, "$keys' listener, and the select-all guard of an app root");
     $dispose(root);
     assert.equal(t.on(document, 'keydown'), 0, 'removed with the root');
   });

@@ -188,13 +188,44 @@ the figure's bounds, along the line the canvases take. The skews
 
 | Renderer | Options |
 | --- | --- |
-| `$dom(document, options)` | `layout` (a layout engine instead of the browser's, below), `font` and `mono` (below), `theme` (token overrides, set on the host element as `--ren-<token>` custom properties, colors as CSS colors and metrics in px, every token so nothing inherits from an outer root; never on `:root` or the document), `styles` (true: a `<style data-ren-style>` inside the host element whose selectors are `[data-ren-root="<id>"] …:not([data-ren-root="<id>"] [data-ren-root] *)`, so they stop at nested roots; false: none; a string: extra CSS inside `@scope ([data-ren-root="<id>"]) to ([data-ren-root])`) |
-| `$shadow(options)` | `mode` (`'open'` or `'closed'`), `document` (the document it builds in before `open`; the global one by default), and every `$dom` option (`layout`, `font`, `mono`, `theme`, `styles`); the root attaches a shadow root to its host element and renders into it; the stylesheet is a constructable `CSSStyleSheet` adopted by that shadow root (a `<style>` inside it where constructable sheets are missing); portals render into the shadow root |
+| `$dom(document, options)` | `behavior` (`'app'`, the default, or `'page'`, or `{ like, …switches }`: below), `layout` (a layout engine instead of the browser's, below), `font` and `mono` (below), `theme` (token overrides, set on the host element as `--ren-<token>` custom properties, colors as CSS colors and metrics in px, every token so nothing inherits from an outer root; never on `:root` or the document), `styles` (true: a `<style data-ren-style>` inside the host element whose selectors are `[data-ren-root="<id>"] …:not([data-ren-root="<id>"] [data-ren-root] *)`, so they stop at nested roots; false: none; a string: extra CSS inside `@scope ([data-ren-root="<id>"]) to ([data-ren-root])`) |
+| `$shadow(options)` | `mode` (`'open'` or `'closed'`), `document` (the document it builds in before `open`; the global one by default), and every `$dom` option (`behavior`, `layout`, `font`, `mono`, `theme`, `styles`); the root attaches a shadow root to its host element and renders into it; the stylesheet is a constructable `CSSStyleSheet` adopted by that shadow root (a `<style>` inside it where constructable sheets are missing); portals render into the shadow root |
 
 Both hosts implement `nest()`: a `<Root>` nested in their views without a
 `renderer` renders into the light DOM (`$dom` of the same document), and any
 other renderer (ren-skia, ren-three) can be nested in them, since their
 elements hold a nested root's host element.
+
+### App or page (`behavior`)
+
+A root behaves as an application by default, and as a web page with
+`behavior: 'page'`; `{ like: 'app' | 'page', …switches }` sets one part on
+its own (ren-core's `behaviorOf`). Each switch off does this, so it holds
+with `styles: false` too:
+
+| Switch | Off |
+| --- | --- |
+| `select` | `user-select: none` (and `-webkit-`) on the host element: loose text is not selectable |
+| `textCursor` | `cursor: default` on the host element: no I-beam over loose text (an element's own cursor stays) |
+| `selectAll` | Ctrl or Cmd+A in the root (focused in it, or nothing focused while the selection is in it or in no root): a field selects its own text; else the text opted in around the selection or the focus is selected; else nothing |
+| `menu` | each delegation root cancels `contextmenu` over the root's nodes (the handlers still hear it), but in a field while `editMenu` is on |
+| `editMenu` | the browser's menu is cancelled in fields too |
+| `callout` | `-webkit-touch-callout: none` and `-webkit-tap-highlight-color: transparent` on the host element |
+
+An Edit is selectable with the I-beam whatever the behavior (inline on it:
+`user-select: text`, `cursor: text`; a style's own wins), and the sheet
+gives the text fields the application writes (`textarea`, text `input`s,
+`contenteditable`) the same where loose text has neither. The style
+`select: 'text'` opts an element's text in (`user-select` and
+`-webkit-user-select`, and `cursor: auto` unless the style sets a cursor,
+so its text shows the I-beam and an Action inside it does not), `'none'`
+out. A field is an `input`, `textarea`, `select` or `contenteditable`
+element. `prevent="contextmenu"` cancels the menu whatever the behavior.
+A `'page'` root writes nothing on its host element. A nested root's host
+element is given back what its parent turned off (`user-select: text`,
+`cursor: auto`, the callout's defaults) unless it sets its own, so a page
+inside an application, or an application with the I-beam on, is not
+caught by its parent's cascade.
 
 ### Text in the canvases' fonts (`font`, `mono`)
 
@@ -436,6 +467,11 @@ npm test           # declarations, tsc --checkJs --strict, the TypeScript consum
 - `test/style.test.jsx` covers the portable style on the DOM: ren-core's
   vocabulary written as CSS, the box model's defaults on every primitive,
   state styles as classes, and the shorthand props a style overrides.
+- `test/behavior.test.jsx` covers the `behavior` option: an app's host
+  styles (with `styles: false` too) and their removal, a page's none, each
+  switch alone, Edits and the application's text fields selectable with the
+  I-beam, `select: 'text'`, the context menu over nodes and in fields,
+  Ctrl or Cmd+A, and nested roots.
 - `test/layout.test.jsx` covers the `layout` option: each primitive at the
   box a ren-canv Document computes for the same view, changes moving only
   what moved.

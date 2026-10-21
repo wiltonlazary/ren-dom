@@ -164,7 +164,7 @@ describe('ren dom text actions', () => {
     assert.deepEqual([other.secret(), other.readOnly(), other.disabled()], [true, true, true]);
   });
 
-  it("puts a document's text actions on it while a view is there, a Label's under a pointer, none over a field or no Label", () => {
+  it("puts a document's text actions on it while a view is there, a Label's or a button's own under a pointer, none over a field or no text", () => {
     const { document, container } = setup();
     const dispose = render(() => (
       <View>
@@ -180,8 +180,10 @@ describe('ren dom text actions', () => {
     // happy-dom places no caret: the event's target's Label.
     assert.deepEqual(textAt(point(first, 'pointerdown')), { node: first, text: 'first words', pressed: false });
     assert.equal(textAt(point(container.querySelector('input'), 'pointerdown')), null, 'a field');
-    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown')), null, "an Action's own text: no Label");
-    assert.equal(textAt(point(container.querySelector('button:not([data-ren])'), 'pointerdown')), null, "a button's own text: no Label");
+    const action = container.querySelector('[data-ren="Action"]');
+    const button = container.querySelector('button:not([data-ren])');
+    assert.deepEqual(textAt(point(action, 'pointerdown')), { node: action, text: 'go', pressed: true }, "an Action's own text");
+    assert.deepEqual(textAt(point(button, 'pointerdown')), { node: button, text: 'own', pressed: true }, "a button's own text");
     assert.equal(textAt(point(container.firstChild, 'pointerdown')), null, 'no text');
     // The browser's caret under the point: its text node's Label, while its boxes hold the point.
     /** @type {any} */ (document).caretPositionFromPoint = () => ({ offsetNode: second.firstChild, offset: 1 });
@@ -219,7 +221,7 @@ describe('ren dom text actions', () => {
     assert.deepEqual(textAt(point(own, 'pointerdown')), { node: own, text: 'own', pressed: true }, "a button's");
     assert.deepEqual(textAt(point(loose, 'pointerdown')), { node: loose, text: 'loose', pressed: false }, 'loose text');
     assert.equal(textAt(point(typed, 'pointerdown')), null, 'in a contenteditable field');
-    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown', { clientX: undefined })), null, "the Action's own box: no Label");
+    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown', { clientX: undefined })), null, "the Action's own box around its Label: none");
     // The browser's caret in a pressed Label's text: that Label, pressed.
     /** @type {any} */ (document).caretPositionFromPoint = () => ({ offsetNode: amount.firstChild, offset: 2 });
     assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: amount, text: '12,50', pressed: true });
@@ -271,6 +273,34 @@ describe('ren dom text actions', () => {
     assert.equal(point(amount, 'pointerdown', { clientX: 1, buttons: 1 }).defaultPrevented, false, 'released: a press is the Action\'s');
     amount.click();
     assert.equal(presses, 2, 'Escape: the Action presses again');
+    release();
+  });
+
+  it("opens selection on an Action's own text as on a Label's: a held drag selects a part, never pressing it, until Escape", () => {
+    const { document, container } = setup();
+    let presses = 0;
+    render(() => <View><Action text="Go there" onPress={() => presses++} /></View>, container);
+    const action = container.querySelector('[data-ren="Action"]');
+    const before = [action.style.getPropertyValue('user-select'), action.style.getPropertyValue('cursor')];
+    // The browser's caret: in the Action's own text at the point's x as its offset.
+    /** @type {any} */ (document).caretPositionFromPoint = (/** @type {number} */ x) => ({ offsetNode: action.firstChild, offset: x });
+    const at = /** @type {any} */ (textAt(point(action, 'pointerdown', { clientX: 4 })));
+    assert.deepEqual(at, { node: action, text: 'Go there', pressed: true }, 'the caret in its own text');
+    const release = /** @type {() => void} */ (selectText(at.node));
+    assert.deepEqual([action.style.getPropertyValue('user-select'), action.style.getPropertyValue('cursor')], ['text', 'text']);
+    const selection = document.getSelection();
+    assert.equal(String(selection), 'Go there');
+    assert.equal(point(action, 'pointerdown', { clientX: 3, buttons: 1 }).defaultPrevented, true);
+    point(action, 'pointermove', { clientX: 8, buttons: 1 });
+    point(action, 'pointerup', { clientX: 8 });
+    assert.equal(String(selection), 'there');
+    action.click();
+    assert.equal(presses, 0, "the release's click never presses it");
+    document.dispatchEvent(new document.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.deepEqual([action.style.getPropertyValue('user-select'), action.style.getPropertyValue('cursor')], before, 'Escape releases it');
+    assert.equal(point(action, 'pointerdown', { clientX: 3, buttons: 1 }).defaultPrevented, false);
+    action.click();
+    assert.equal(presses, 1, 'Escape: it presses again');
     release();
   });
 

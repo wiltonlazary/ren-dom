@@ -1256,6 +1256,8 @@ const LABELS = '[data-ren="Label"]';
 const EDITING = 'input, textarea, select, [contenteditable]:not([contenteditable="false" i])';
 /** The press targets: a static text in one is `pressed`. */
 const PRESSES = 'button, a, [role="button" i], [data-ren="Action"]';
+/** The buttons whose own text (a text node of theirs, no Label in them) is static text as a Label's is. */
+const BUTTONS = 'button, [role="button" i], [data-ren="Action"]';
 /** The inline properties a selected text is given, kept to put back. */
 const OPENED = [['user-select', 'text'], ['-webkit-user-select', 'text'], ['cursor', 'text']];
 
@@ -1314,11 +1316,27 @@ const holds = (doc, text, x, y) => {
 };
 
 /**
+ * The static text `el` holds as its own: a Label, or a button whose text
+ * is its own (a text node of its, no Label in it); else null.
+ * @param {any} el
+ */
+const textual = el => {
+  if (el == null || typeof el.closest !== 'function') return null;
+  const label = el.closest(LABELS);
+  if (label != null) return label;
+  const button = el.closest(BUTTONS);
+  if (button == null || button.querySelector(LABELS) != null) return null;
+  for (const n of button.childNodes) if (n.nodeType === 3 && n.data.trim() !== '') return button;
+  return null;
+};
+
+/**
  * The text actions of a document or a shadow root (ren-core's
  * TextActions), kept on it under TEXT, and `close`, which ends an open
- * selection. Static text is a Label's: `at` finds the Label under a
- * pointer event (the text node the browser places a caret in, else the
- * event's target's), `pressed` inside a press target, none over a field;
+ * selection. Static text is a Label's, or a button's own (an Action's
+ * `text`): `at` finds the Label or button under a pointer event (the text
+ * node the browser places a caret in, else the event's target's), `pressed`
+ * inside a press target, none over a field;
  * `select` gives it `user-select: text` and the I-beam inline and selects
  * all of it, until a press outside it, Escape (which also clears the
  * selection in it) or the release, and holds the presses inside it: a
@@ -1346,10 +1364,10 @@ function textActions(top) {
       if (typeof x === 'number' && typeof y === 'number') {
         const hit = caretAt(doc, top, x, y)?.node ?? null;
         const parent = hit?.nodeType === 3 ? hit.parentNode : null;
-        const found = typeof parent?.closest === 'function' ? parent.closest(LABELS) : null;
+        const found = textual(parent);
         if (found != null && found.closest(EDITING) == null && holds(doc, hit, x, y)) label = found;
       }
-      label ??= target.closest(LABELS);
+      label ??= textual(target);
       if (label == null) return null;
       const text = label.textContent ?? '';
       return text === '' ? null : { node: label, text, pressed: label.closest(PRESSES) != null };

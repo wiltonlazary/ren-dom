@@ -428,15 +428,17 @@ What an application's own menus do to text (ren-core's `EDIT`, `TEXT`,
   `secret` is a password field.
 - The document (or the shadow root a `$shadow` root renders into) holds
   the static text's actions under `TEXT` while a view is there. Static
-  text is a Label's: `at` finds the Label holding the text node the
-  browser places a caret in under the event's point
+  text is a Label's, or a button's own (an Action, a button or a
+  `role="button"` element holding a text node of its own and no Label,
+  as an Action's `text`): `at` finds the Label or button holding the
+  text node the browser places a caret in under the event's point
   (`caretPositionFromPoint`, else `caretRangeFromPoint`) when that text's
-  boxes hold the point, else the Label around the event's target, with
+  boxes hold the point, else the one around the event's target, with
   `pressed` true inside a press target (an Action, a button, a link,
-  `role="button"`); none inside a field (an input, a textarea, a select,
-  `contenteditable`) or over a Label with no text. `select` gives the
-  Label `user-select: text` (and `-webkit-`) and `cursor: text` inline and
-  selects all of it. While it is open, its presses select and never press
+  `role="button"`) and for a button's own text; none inside a field (an
+  input, a textarea, a select, `contenteditable`) or over no text.
+  `select` gives the Label or button `user-select: text` (and
+  `-webkit-`) and `cursor: text` inline and selects all of it. While it is open, its presses select and never press
   what holds it: a primary press inside is cancelled (its `pointerdown`
   and `mousedown`, so no focus or press) and starts a selection where it
   lands (Shift extends the one there), its drag selects up to the caret

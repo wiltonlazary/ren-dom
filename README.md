@@ -431,14 +431,22 @@ What an application's own menus do to text (ren-core's `EDIT`, `TEXT`,
   text is a Label's: `at` finds the Label holding the text node the
   browser places a caret in under the event's point
   (`caretPositionFromPoint`, else `caretRangeFromPoint`) when that text's
-  boxes hold the point, else the Label around the event's target; none
-  over a field or a press target (an Action, a button, a link,
-  `role="button"`) or a Label with no text. `select` gives the Label
-  `user-select: text` (and `-webkit-`) and `cursor: text` inline and
-  selects all of it, so a drag inside it keeps a part; a press outside it,
-  Escape (which also clears the selection in it), the next `select` or
-  its release puts its own inline values back. `selected` is a focused
-  field's selection (none of a password field's), else the page's.
+  boxes hold the point, else the Label around the event's target, with
+  `pressed` true inside a press target (an Action, a button, a link,
+  `role="button"`); none inside a field (an input, a textarea, a select,
+  `contenteditable`) or over a Label with no text. `select` gives the
+  Label `user-select: text` (and `-webkit-`) and `cursor: text` inline and
+  selects all of it. While it is open, its presses select and never press
+  what holds it: a primary press inside is cancelled (its `pointerdown`
+  and `mousedown`, so no focus or press) and starts a selection where it
+  lands (Shift extends the one there), its drag selects up to the caret
+  under the pointer (held by the document, since a browser drags no
+  selection inside a button; a point past the text stops at its start or
+  end), and the `click` of its release is swallowed; a right press inside
+  keeps the selection, for a menu. A press outside it, Escape (which also
+  clears the selection in it), the next `select` or its release ends this
+  and puts its own inline values back. `selected` is a focused field's
+  selection (none of a password field's), else the page's.
 - A right press in an Edit where an application's own menu is in charge
   (the Edit or an element around it has `prevent="contextmenu"`) has its
   `mousedown` cancelled, so the field keeps its selection (Chrome would

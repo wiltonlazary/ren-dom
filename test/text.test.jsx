@@ -164,7 +164,7 @@ describe('ren dom text actions', () => {
     assert.deepEqual([other.secret(), other.readOnly(), other.disabled()], [true, true, true]);
   });
 
-  it("puts a document's text actions on it while a view is there, a Label's under a pointer, none over a field or a press", () => {
+  it("puts a document's text actions on it while a view is there, a Label's under a pointer, none over a field or no Label", () => {
     const { document, container } = setup();
     const dispose = render(() => (
       <View>
@@ -178,28 +178,100 @@ describe('ren dom text actions', () => {
     assert.equal(/** @type {any} */ (document)[TEXT] != null, true);
     const [first, second] = container.querySelectorAll('[data-ren="Label"]');
     // happy-dom places no caret: the event's target's Label.
-    assert.deepEqual(textAt(point(first, 'pointerdown')), { node: first, text: 'first words' });
+    assert.deepEqual(textAt(point(first, 'pointerdown')), { node: first, text: 'first words', pressed: false });
     assert.equal(textAt(point(container.querySelector('input'), 'pointerdown')), null, 'a field');
-    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown')), null, 'an Action');
-    assert.equal(textAt(point(container.querySelector('button:not([data-ren])'), 'pointerdown')), null, 'a button');
+    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown')), null, "an Action's own text: no Label");
+    assert.equal(textAt(point(container.querySelector('button:not([data-ren])'), 'pointerdown')), null, "a button's own text: no Label");
     assert.equal(textAt(point(container.firstChild, 'pointerdown')), null, 'no text');
     // The browser's caret under the point: its text node's Label, while its boxes hold the point.
     /** @type {any} */ (document).caretPositionFromPoint = () => ({ offsetNode: second.firstChild, offset: 1 });
-    assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: second, text: 'second' });
+    assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: second, text: 'second', pressed: false });
     const Range = /** @type {any} */ (document.defaultView).Range;
     const rects = Range.prototype.getClientRects;
     Range.prototype.getClientRects = () => [{ left: 0, right: 5, top: 0, bottom: 5 }];
     try {
       assert.equal(textAt(point(container.firstChild, 'pointerdown')), null, 'the caret beside the text: none');
-      assert.deepEqual(textAt(point(container.firstChild, 'pointerdown', { clientX: 2, clientY: 2 })), { node: second, text: 'second' });
+      assert.deepEqual(textAt(point(container.firstChild, 'pointerdown', { clientX: 2, clientY: 2 })), { node: second, text: 'second', pressed: false });
     } finally {
       Range.prototype.getClientRects = rects;
     }
     delete (/** @type {any} */ (document)).caretPositionFromPoint;
     /** @type {any} */ (document).caretRangeFromPoint = () => ({ startContainer: first.firstChild });
-    assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: first, text: 'first words' }, "the older caretRangeFromPoint");
+    assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: first, text: 'first words', pressed: false }, "the older caretRangeFromPoint");
     dispose();
     assert.equal(/** @type {any} */ (document)[TEXT], undefined, 'gone with the last view');
+  });
+
+  it('finds a Label inside a press target too, pressed there, and none inside a field', () => {
+    const { document, container } = setup();
+    render(() => (
+      <View>
+        <Action><Label text="12,50" /></Action>
+        <View role="button"><Label text="row" /></View>
+        <button><Label text="own" /></button>
+        <Label text="loose" />
+        <div contenteditable="true"><Label text="typed" /></div>
+      </View>
+    ), container);
+    const [amount, row, own, loose, typed] = container.querySelectorAll('[data-ren="Label"]');
+    assert.deepEqual(textAt(point(amount, 'pointerdown')), { node: amount, text: '12,50', pressed: true }, "an Action's");
+    assert.deepEqual(textAt(point(row, 'pointerdown')), { node: row, text: 'row', pressed: true }, 'a role="button" row\'s');
+    assert.deepEqual(textAt(point(own, 'pointerdown')), { node: own, text: 'own', pressed: true }, "a button's");
+    assert.deepEqual(textAt(point(loose, 'pointerdown')), { node: loose, text: 'loose', pressed: false }, 'loose text');
+    assert.equal(textAt(point(typed, 'pointerdown')), null, 'in a contenteditable field');
+    assert.equal(textAt(point(container.querySelector('[data-ren="Action"]'), 'pointerdown', { clientX: undefined })), null, "the Action's own box: no Label");
+    // The browser's caret in a pressed Label's text: that Label, pressed.
+    /** @type {any} */ (document).caretPositionFromPoint = () => ({ offsetNode: amount.firstChild, offset: 2 });
+    assert.deepEqual(textAt(point(container.firstChild, 'pointerdown')), { node: amount, text: '12,50', pressed: true });
+    /** @type {any} */ (document).caretPositionFromPoint = () => ({ offsetNode: typed.firstChild, offset: 2 });
+    assert.equal(textAt(point(container.firstChild, 'pointerdown')), null, "a field's text under the caret");
+  });
+
+  it("holds the drag in an opened text inside an Action: a part selected, its click swallowed, until it is released", () => {
+    const { document, container } = setup();
+    let presses = 0;
+    render(() => (
+      <View>
+        <Action onPress={() => presses++}><Label text="1234,50" /></Action>
+        <Label text="other" />
+      </View>
+    ), container);
+    const [amount, other] = container.querySelectorAll('[data-ren="Label"]');
+    // The browser's caret: in the amount at the point's x as its offset, past x 20 in the other text.
+    /** @type {any} */ (document).caretPositionFromPoint = (/** @type {number} */ x) => (x > 20 ? { offsetNode: other.firstChild, offset: 1 } : { offsetNode: amount.firstChild, offset: x });
+    const release = /** @type {() => void} */ (selectText(amount));
+    const selection = document.getSelection();
+    assert.equal(String(selection), '1234,50');
+    const down = point(amount, 'pointerdown', { clientX: 1, buttons: 1 });
+    assert.equal(down.defaultPrevented, true, 'the press is the drag\'s');
+    assert.equal(String(selection), '', 'a new selection where it lands');
+    point(amount, 'pointermove', { clientX: 4, buttons: 1 });
+    assert.equal(String(selection), '234');
+    point(amount, 'pointermove', { clientX: 0, buttons: 1 });
+    assert.equal(String(selection), '1', 'back past the anchor');
+    point(amount, 'pointermove', { clientX: 30, buttons: 1 });
+    assert.equal(String(selection), '234,50', 'past the text: to its end');
+    point(amount, 'pointerup', { clientX: 30 });
+    point(amount, 'pointermove', { clientX: 2, buttons: 0 });
+    assert.equal(String(selection), '234,50', 'released: moves select nothing');
+    assert.equal(mousedown(amount, 0), true, "the mouse press's default (focus, the button's press) is the drag's");
+    amount.click();
+    assert.equal(presses, 0, "the release's click never presses the Action");
+    point(amount, 'pointerdown', { button: 2 });
+    assert.equal(String(selection), '234,50', 'a right press inside keeps the selection, for a menu');
+    point(amount, 'pointerdown', { clientX: 2, buttons: 1 });
+    point(amount, 'pointermove', { clientX: 5, buttons: 1 });
+    point(amount, 'pointerup', { clientX: 5 });
+    assert.equal(String(selection), '34,');
+    container.querySelector('[data-ren="Action"]').click();
+    assert.equal(presses, 0, 'a release outside the text: its click around it is swallowed too');
+    amount.click();
+    assert.equal(presses, 1, 'once: the next click presses');
+    document.dispatchEvent(new document.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(point(amount, 'pointerdown', { clientX: 1, buttons: 1 }).defaultPrevented, false, 'released: a press is the Action\'s');
+    amount.click();
+    assert.equal(presses, 2, 'Escape: the Action presses again');
+    release();
   });
 
   it('opens selection on a text and selects all of it, until a press outside it, Escape or its release', () => {
@@ -277,7 +349,7 @@ describe('ren dom text actions', () => {
     });
     const shadow = label.getRootNode();
     assert.equal(shadow[TEXT] != null && shadow[TEXT] !== /** @type {any} */ (document)[TEXT], true);
-    assert.deepEqual(textAt(point(label, 'pointerdown')), { node: label, text: 'inside' });
+    assert.deepEqual(textAt(point(label, 'pointerdown')), { node: label, text: 'inside', pressed: false });
     $dispose(root);
     assert.equal(shadow[TEXT], undefined);
   });

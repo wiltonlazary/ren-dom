@@ -1252,23 +1252,51 @@ class Field {
 
 /** A ren-dom Label element. */
 const LABELS = '[data-ren="Label"]';
-/** What a static text's actions skip: the fields and the press targets. */
-const UNTEXT = 'input, textarea, select, [contenteditable]:not([contenteditable="false" i]), button, a, [role="button" i], [data-ren="Action"]';
+/** The fields: no static text in them. */
+const EDITING = 'input, textarea, select, [contenteditable]:not([contenteditable="false" i])';
+/** The press targets: a static text in one is `pressed`. */
+const PRESSES = 'button, a, [role="button" i], [data-ren="Action"]';
 /** The inline properties a selected text is given, kept to put back. */
 const OPENED = [['user-select', 'text'], ['-webkit-user-select', 'text'], ['cursor', 'text']];
 
 /**
- * The node under the point (`clientX`, `clientY`) as the browser places a
- * caret there, in `top`'s shadow tree when it is a shadow root: null where
- * the document cannot tell.
+ * The caret the browser places under the point (`clientX`, `clientY`), as
+ * its node and offset, in `top`'s shadow tree when it is a shadow root:
+ * null where the document cannot tell.
  * @param {any} doc @param {any} top @param {number} x @param {number} y
+ * @returns {{ node: any, offset: number } | null}
  */
 const caretAt = (doc, top, x, y) => {
   try {
-    if (typeof doc.caretPositionFromPoint === 'function') return (top === doc ? doc.caretPositionFromPoint(x, y) : doc.caretPositionFromPoint(x, y, { shadowRoots: [top] }))?.offsetNode ?? null;
-    if (typeof doc.caretRangeFromPoint === 'function') return doc.caretRangeFromPoint(x, y)?.startContainer ?? null;
+    if (typeof doc.caretPositionFromPoint === 'function') {
+      const at = top === doc ? doc.caretPositionFromPoint(x, y) : doc.caretPositionFromPoint(x, y, { shadowRoots: [top] });
+      return at?.offsetNode != null ? { node: at.offsetNode, offset: at.offset } : null;
+    }
+    if (typeof doc.caretRangeFromPoint === 'function') {
+      const at = doc.caretRangeFromPoint(x, y);
+      return at?.startContainer != null ? { node: at.startContainer, offset: at.startOffset } : null;
+    }
   } catch {}
   return null;
+};
+
+/**
+ * The caret under a pointer event's point within `node`: the browser's
+ * when it lies in `node`, else `node`'s start or end, whichever side of
+ * it the point is on; null where the document places no caret.
+ * @param {any} doc @param {any} top @param {any} node @param {any} e
+ * @returns {{ node: any, offset: number } | null}
+ */
+const caretIn = (doc, top, node, e) => {
+  const x = e.clientX;
+  const y = e.clientY;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+  if (typeof doc.caretPositionFromPoint !== 'function' && typeof doc.caretRangeFromPoint !== 'function') return null;
+  const at = caretAt(doc, top, x, y);
+  if (at !== null && around(node, at.node)) return at;
+  const box = node.getBoundingClientRect();
+  const after = y > box.bottom || (y >= box.top && x >= (box.left + box.right) / 2);
+  return { node, offset: after ? node.childNodes.length : 0 };
 };
 
 /**
@@ -1290,11 +1318,14 @@ const holds = (doc, text, x, y) => {
  * TextActions), kept on it under TEXT, and `close`, which ends an open
  * selection. Static text is a Label's: `at` finds the Label under a
  * pointer event (the text node the browser places a caret in, else the
- * event's target's), none over a field or a press target; `select` gives
- * it `user-select: text` and the I-beam inline and selects all of it, until
- * a press outside it, Escape (which also clears the selection in it) or the
- * release; `selected` is a focused field's selection (none of a password's),
- * else the page's.
+ * event's target's), `pressed` inside a press target, none over a field;
+ * `select` gives it `user-select: text` and the I-beam inline and selects
+ * all of it, until a press outside it, Escape (which also clears the
+ * selection in it) or the release, and holds the presses inside it: a
+ * primary one drags a selection of a part (a browser drags none inside a
+ * button) and its click never reaches what holds the text, a right one
+ * keeps the selection; `selected` is a focused field's selection (none of a
+ * password's), else the page's.
  * @param {any} top a document or a shadow root
  * @returns {{ actions: TextActions, close: () => void }}
  */
@@ -1307,21 +1338,21 @@ function textActions(top) {
     at(event) {
       let target = event?.target ?? null;
       if (target != null && target.nodeType !== 1) target = target.parentNode;
-      if (target == null || typeof target.closest !== 'function' || target.closest(UNTEXT) != null) return null;
+      if (target == null || typeof target.closest !== 'function' || target.closest(EDITING) != null) return null;
       /** @type {any} */
       let label = null;
       const x = event.clientX;
       const y = event.clientY;
       if (typeof x === 'number' && typeof y === 'number') {
-        const hit = caretAt(doc, top, x, y);
+        const hit = caretAt(doc, top, x, y)?.node ?? null;
         const parent = hit?.nodeType === 3 ? hit.parentNode : null;
         const found = typeof parent?.closest === 'function' ? parent.closest(LABELS) : null;
-        if (found != null && found.closest(UNTEXT) == null && holds(doc, hit, x, y)) label = found;
+        if (found != null && found.closest(EDITING) == null && holds(doc, hit, x, y)) label = found;
       }
       label ??= target.closest(LABELS);
       if (label == null) return null;
       const text = label.textContent ?? '';
-      return text === '' ? null : { node: label, text };
+      return text === '' ? null : { node: label, text, pressed: label.closest(PRESSES) != null };
     },
     select(node) {
       open?.();
@@ -1338,30 +1369,87 @@ function textActions(top) {
       // A closed shadow root hides its nodes from the document's path: a press retargeted to its host is inside.
       const closed = node.getRootNode?.()?.mode === 'closed';
       /** @param {any} e */
-      const press = e => {
-        if (e.composedPath().includes(node) || (closed && around(e.target, node))) {
-          // A primary press inside starts a selection of a part where it lands: the selected text would drag as a
-          // whole (and a drag is cancelled here), leaving nothing selected. A right press keeps it for a menu.
-          if ((e.button ?? 0) === 0 && !e.shiftKey) (doc.getSelection?.() ?? null)?.removeAllRanges();
-          return;
-        }
-        release();
+      const inside = e => e.composedPath().includes(node) || (closed && around(e.target, node));
+      /** Where the held drag started, as a caret in the text. @type {{ node: any, offset: number } | null} */
+      let anchor = null;
+      /** A primary press inside is held, up to its release. */
+      let held = false;
+      /** The click a held drag's release fires comes next. */
+      let swallow = false;
+      /** Selects from the anchor to the caret under the event's point. @param {any} e */
+      const drag = e => {
+        const now = doc.getSelection?.() ?? null;
+        const focus = caretIn(doc, top, node, e);
+        if (now === null) return;
+        if (anchor === null || focus === null) now.removeAllRanges();
+        else now.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
       };
       /** @param {any} e */
+      const press = e => {
+        swallow = false;
+        if (!inside(e)) return void release();
+        // A right press keeps the selection, for a menu.
+        if ((e.button ?? 0) !== 0) return;
+        // A primary press selects, never presses what holds the text (a button, a row): the drag is held here, since
+        // a browser drags no selection inside a button. It starts a selection of a part where it lands (Shift extends
+        // the one there), so the selected whole never drags.
+        e.preventDefault();
+        e.stopPropagation();
+        const now = doc.getSelection?.() ?? null;
+        anchor = e.shiftKey && now?.anchorNode != null && around(node, now.anchorNode) ? { node: now.anchorNode, offset: now.anchorOffset } : caretIn(doc, top, node, e);
+        held = true;
+        drag(e);
+      };
+      /** @param {any} e */
+      const move = e => {
+        if (!held) return;
+        if (((e.buttons ?? 0) & 1) === 0) return void (held = false);
+        drag(e);
+      };
+      /** @param {any} e */
+      const up = e => {
+        if (!held) return;
+        held = false;
+        swallow = e.type === 'pointerup';
+      };
+      // The click of a held press's release lands on the text, in it or around it (where the release left it): its
+      // button or row never runs. A mouse press and a selection the browser would start there are the drag's too.
+      /** @param {any} e */
+      const click = e => {
+        if (!swallow) return;
+        swallow = false;
+        if (!inside(e) && !around(e.target, node)) return;
+        e.preventDefault();
+        e.stopPropagation();
+      };
+      /** @param {any} e */
+      const down = e => {
+        if ((e.button ?? 0) !== 0 || !inside(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+      };
+      /** @param {any} e */
+      const start = e => {
+        if (held && inside(e)) e.preventDefault();
+      };
+      /** @type {[string, (e: any) => void][]} */
+      const listeners = [['pointerdown', press], ['pointermove', move], ['pointerup', up], ['pointercancel', up], ['click', click], ['mousedown', down], ['selectstart', start]];
+      /** @param {any} e */
       const key = e => {
+        swallow = false;
         if (e.key !== 'Escape') return;
         const now = doc.getSelection?.() ?? null;
         if (now?.anchorNode != null && around(node, now.anchorNode)) now.removeAllRanges();
         release();
       };
-      doc.addEventListener('pointerdown', press, true);
+      for (const [type, listener] of listeners) doc.addEventListener(type, listener, true);
       doc.addEventListener('keydown', key, true);
       let live = true;
       const release = () => {
         if (!live) return;
         live = false;
         if (open === release) open = null;
-        doc.removeEventListener('pointerdown', press, true);
+        for (const [type, listener] of listeners) doc.removeEventListener(type, listener, true);
         doc.removeEventListener('keydown', key, true);
         OPENED.forEach(([name], i) => {
           const [value, priority] = kept[i];

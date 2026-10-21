@@ -7,9 +7,11 @@
 // and events. Bindings write the DOM directly in the Render phase; there is
 // no virtual DOM and no diff beyond each property's previous value.
 
-import { mount, skeleton, Theme, COLORS, UNITLESS, focusables, argb, behaviorOf } from 'ren-core/host';
+import { mount, skeleton, Theme, COLORS, UNITLESS, focusables, argb, behaviorOf, EDIT, TEXT } from 'ren-core/host';
 
 /** @typedef {import('ren-core/host').Host} Host */
+/** @typedef {import('ren-core/host').EditActions} EditActions */
+/** @typedef {import('ren-core/host').TextActions} TextActions */
 /** @typedef {import('ren-core/host').Switches} Switches */
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -1144,6 +1146,281 @@ function caretRow() {
   return { row, rows };
 }
 
+/** Whether `node` has the focus in its document or shadow root. @param {any} node */
+const focused = node => (node.getRootNode?.() ?? node.ownerDocument)?.activeElement === node;
+
+/**
+ * An Edit's actions (ren-core's EditActions), on its ref under EDIT: what
+ * an application's own menu does to the field. `replace` is a user's edit:
+ * in the focused field the browser's `insertText` (its undo keeps it, its
+ * `input` fires); elsewhere, or where the browser refuses it,
+ * `setRangeText` and an `input` event, so onChange hears it either way.
+ * The DOM tells nothing of a field's undo history: `canUndo` and `canRedo`
+ * are true, and `undo` and `redo` say whether the browser stepped.
+ * @implements {EditActions}
+ */
+class Field {
+  /** @param {any} node the input or textarea */
+  constructor(node) {
+    this.node = node;
+  }
+  value() {
+    return String(this.node.value);
+  }
+  selection() {
+    const node = this.node;
+    const length = String(node.value).length;
+    // An input type without a selection (number, email) reads null or throws.
+    let start = length;
+    let end = length;
+    /** @type {'forward' | 'backward' | 'none'} */
+    let direction = 'none';
+    try {
+      if (typeof node.selectionStart === 'number') start = node.selectionStart;
+      if (typeof node.selectionEnd === 'number') end = node.selectionEnd;
+      if (node.selectionDirection === 'forward' || node.selectionDirection === 'backward') direction = node.selectionDirection;
+    } catch {}
+    return { start, end, direction };
+  }
+  /** @param {number} start @param {number} end @param {'forward' | 'backward' | 'none'} [direction] */
+  setSelection(start, end, direction = 'none') {
+    try {
+      this.node.setSelectionRange(start, end, direction);
+    } catch {}
+  }
+  /** @param {string} text */
+  replace(text) {
+    const node = this.node;
+    if (node.readOnly === true || node.disabled === true) return;
+    // A one-line field takes no line breaks, as its paste drops them.
+    const put = node.tagName === 'TEXTAREA' ? String(text) : String(text).replace(/[\r\n]+/g, '');
+    const { start, end } = this.selection();
+    if (put === '' && start === end) return;
+    const doc = node.ownerDocument;
+    if (focused(node) && typeof doc?.execCommand === 'function') {
+      let done = false;
+      try {
+        done = doc.execCommand(put === '' ? 'delete' : 'insertText', false, put) === true;
+      } catch {}
+      if (done) return;
+    }
+    node.setRangeText(put, start, end, 'end');
+    const view = doc?.defaultView;
+    const Input = view?.InputEvent ?? view?.Event;
+    if (typeof Input === 'function') node.dispatchEvent(new Input('input', { bubbles: true, inputType: put === '' ? 'deleteContent' : 'insertReplacementText', data: put === '' ? null : put }));
+  }
+  selectAll() {
+    this.node.select();
+  }
+  undo() {
+    return this.step('undo');
+  }
+  redo() {
+    return this.step('redo');
+  }
+  /** The browser's undo or redo in the field, focused first: whether it stepped. @param {string} command */
+  step(command) {
+    const node = this.node;
+    node.focus();
+    const doc = node.ownerDocument;
+    if (typeof doc?.execCommand !== 'function') return false;
+    try {
+      return doc.execCommand(command) === true;
+    } catch {
+      return false;
+    }
+  }
+  canUndo() {
+    return true;
+  }
+  canRedo() {
+    return true;
+  }
+  focus() {
+    this.node.focus();
+  }
+  secret() {
+    return this.node.type === 'password';
+  }
+  readOnly() {
+    return this.node.readOnly === true;
+  }
+  disabled() {
+    return this.node.disabled === true;
+  }
+}
+
+/** A ren-dom Label element. */
+const LABELS = '[data-ren="Label"]';
+/** What a static text's actions skip: the fields and the press targets. */
+const UNTEXT = 'input, textarea, select, [contenteditable]:not([contenteditable="false" i]), button, a, [role="button" i], [data-ren="Action"]';
+/** The inline properties a selected text is given, kept to put back. */
+const OPENED = [['user-select', 'text'], ['-webkit-user-select', 'text'], ['cursor', 'text']];
+
+/**
+ * The node under the point (`clientX`, `clientY`) as the browser places a
+ * caret there, in `top`'s shadow tree when it is a shadow root: null where
+ * the document cannot tell.
+ * @param {any} doc @param {any} top @param {number} x @param {number} y
+ */
+const caretAt = (doc, top, x, y) => {
+  try {
+    if (typeof doc.caretPositionFromPoint === 'function') return (top === doc ? doc.caretPositionFromPoint(x, y) : doc.caretPositionFromPoint(x, y, { shadowRoots: [top] }))?.offsetNode ?? null;
+    if (typeof doc.caretRangeFromPoint === 'function') return doc.caretRangeFromPoint(x, y)?.startContainer ?? null;
+  } catch {}
+  return null;
+};
+
+/**
+ * Whether a text node's boxes hold the point (the nearest caret lies
+ * beside the text too); true where no box is known.
+ * @param {any} doc @param {any} text @param {number} x @param {number} y
+ */
+const holds = (doc, text, x, y) => {
+  const range = doc.createRange();
+  range.selectNodeContents(text);
+  const rects = typeof range.getClientRects === 'function' ? range.getClientRects() : null;
+  if (rects == null || rects.length === 0) return true;
+  for (const r of rects) if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+  return false;
+};
+
+/**
+ * The text actions of a document or a shadow root (ren-core's
+ * TextActions), kept on it under TEXT, and `close`, which ends an open
+ * selection. Static text is a Label's: `at` finds the Label under a
+ * pointer event (the text node the browser places a caret in, else the
+ * event's target's), none over a field or a press target; `select` gives
+ * it `user-select: text` and the I-beam inline and selects all of it, until
+ * a press outside it, Escape (which also clears the selection in it) or the
+ * release; `selected` is a focused field's selection (none of a password's),
+ * else the page's.
+ * @param {any} top a document or a shadow root
+ * @returns {{ actions: TextActions, close: () => void }}
+ */
+function textActions(top) {
+  const doc = top.nodeType === 9 ? top : top.ownerDocument;
+  /** The open selection's release. @type {(() => void) | null} */
+  let open = null;
+  /** @type {TextActions} */
+  const actions = {
+    at(event) {
+      let target = event?.target ?? null;
+      if (target != null && target.nodeType !== 1) target = target.parentNode;
+      if (target == null || typeof target.closest !== 'function' || target.closest(UNTEXT) != null) return null;
+      /** @type {any} */
+      let label = null;
+      const x = event.clientX;
+      const y = event.clientY;
+      if (typeof x === 'number' && typeof y === 'number') {
+        const hit = caretAt(doc, top, x, y);
+        const parent = hit?.nodeType === 3 ? hit.parentNode : null;
+        const found = typeof parent?.closest === 'function' ? parent.closest(LABELS) : null;
+        if (found != null && found.closest(UNTEXT) == null && holds(doc, hit, x, y)) label = found;
+      }
+      label ??= target.closest(LABELS);
+      if (label == null) return null;
+      const text = label.textContent ?? '';
+      return text === '' ? null : { node: label, text };
+    },
+    select(node) {
+      open?.();
+      const style = node.style;
+      const kept = OPENED.map(([name]) => [style.getPropertyValue(name), style.getPropertyPriority(name)]);
+      for (const [name, value] of OPENED) style.setProperty(name, value);
+      const selection = doc.getSelection?.() ?? null;
+      if (selection !== null) {
+        const range = doc.createRange();
+        range.selectNodeContents(node);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      // A closed shadow root hides its nodes from the document's path: a press retargeted to its host is inside.
+      const closed = node.getRootNode?.()?.mode === 'closed';
+      /** @param {any} e */
+      const press = e => {
+        if (e.composedPath().includes(node) || (closed && around(e.target, node))) return;
+        release();
+      };
+      /** @param {any} e */
+      const key = e => {
+        if (e.key !== 'Escape') return;
+        const now = doc.getSelection?.() ?? null;
+        if (now?.anchorNode != null && around(node, now.anchorNode)) now.removeAllRanges();
+        release();
+      };
+      doc.addEventListener('pointerdown', press, true);
+      doc.addEventListener('keydown', key, true);
+      let live = true;
+      const release = () => {
+        if (!live) return;
+        live = false;
+        if (open === release) open = null;
+        doc.removeEventListener('pointerdown', press, true);
+        doc.removeEventListener('keydown', key, true);
+        OPENED.forEach(([name], i) => {
+          const [value, priority] = kept[i];
+          if (value === '') style.removeProperty(name);
+          else style.setProperty(name, value, priority);
+        });
+      };
+      open = release;
+      return release;
+    },
+    selected() {
+      let active = top.activeElement ?? null;
+      while (active?.shadowRoot?.activeElement != null) active = active.shadowRoot.activeElement;
+      if (active != null && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        if (active.type === 'password') return '';
+        try {
+          const start = active.selectionStart;
+          const end = active.selectionEnd;
+          return typeof start === 'number' && typeof end === 'number' ? String(active.value).slice(start, end) : '';
+        } catch {
+          return '';
+        }
+      }
+      // A shadow root's own selection where the browser has one (the document's shows its host).
+      const selection = (typeof top.getSelection === 'function' ? top : doc).getSelection?.() ?? null;
+      return selection === null ? '' : String(selection);
+    },
+  };
+  return { actions, close: () => open?.() };
+}
+
+/** The text actions put on each document and shadow root, and how many delegation roots in it hold them. @type {WeakMap<any, { count: number, close: () => void }>} */
+const texts = new WeakMap();
+
+/**
+ * Puts the text actions on the shadow root `target` is in, else on its
+ * document (an application root's host element is placed in the page after
+ * its container attaches), while a delegation root there holds them;
+ * returns the release.
+ * @param {any} target a delegation root
+ */
+const texted = target => {
+  const root = typeof target.getRootNode === 'function' ? target.getRootNode() : null;
+  const top = root?.nodeType === 11 && root.host != null ? root : target.ownerDocument;
+  if (top?.nodeType !== 9 && top?.nodeType !== 11) return () => {};
+  let held = texts.get(top);
+  if (held === undefined) {
+    const made = textActions(top);
+    top[TEXT] = made.actions;
+    texts.set(top, (held = { count: 0, close: made.close }));
+  }
+  held.count++;
+  const own = held;
+  return () => {
+    if (--own.count > 0) return;
+    texts.delete(top);
+    delete top[TEXT];
+    own.close();
+  };
+};
+
+/** Marks a node whose `prevent` names contextmenu: an application's own menu is in charge there. */
+const MENU = Symbol('ren.menu');
+
 /** An Edit's styled mirror (its `runs`), on its field. */
 const MIRROR = Symbol('ren.mirror');
 /** A select's value set before the option it names was inserted, kept until one is or the user picks one. */
@@ -1975,9 +2252,12 @@ function make(document, options, mode) {
     const old = blocks.get(node);
     if (old !== undefined) for (const remove of old) remove();
     const role = roles.get(node) ?? '';
+    const names = preventions(value);
+    if (names.includes('contextmenu')) node[MENU] = true;
+    else if (node[MENU] === true) node[MENU] = false;
     blocks.set(
       node,
-      preventions(value).map(name => {
+      names.map(name => {
         const event = eventOf(role, name);
         /** @param {any} e */
         const listener = e => {
@@ -2017,6 +2297,8 @@ function make(document, options, mode) {
   const roots = new Map();
   /** The select-all guard of each delegation root, to remove with it. @type {Map<any, () => void>} */
   const guards = new Map();
+  /** The release of the text actions each delegation root holds on its document or shadow root. @type {Map<any, () => void>} */
+  const unholds = new Map();
   /** The key an event carries: the last root this host dispatched it to. */
   const walked = Symbol('ren.walked');
   /** @param {any} e */
@@ -2084,6 +2366,23 @@ function make(document, options, mode) {
     if (n != null && n.nodeType !== 1) n = n.parentNode;
     if (whose(n, e.currentTarget) < 0 || (field(n) ? behavior.editMenu : behavior.menu)) return;
     e.preventDefault();
+  };
+  /**
+   * A right press in an Edit where an application's own menu is in charge
+   * (it or an element around it prevents `contextmenu`) is cancelled, so the
+   * browser keeps the field's selection (Chrome would move the caret to the
+   * press) for the menu's Cut and Copy.
+   * @param {any} e
+   */
+  const unpress = e => {
+    if (e.button !== 2) return;
+    const n = e.target;
+    if (roles.get(n) !== 'Edit' || whose(n, e.currentTarget) < 0) return;
+    for (let m = n; m != null; m = m.parentNode ?? m.host)
+      if (m[MENU] === true) {
+        e.preventDefault();
+        return;
+      }
   };
   /**
    * Ctrl or Cmd+A, with the behavior's `selectAll` off, for a key of the
@@ -2198,6 +2497,38 @@ function make(document, options, mode) {
     return () => {
       shadow?.removeEventListener('keydown', note);
       d.removeEventListener('keydown', listener);
+    };
+  };
+  /**
+   * Root-wide presses (ren-core's `$presses`, `listen(container,
+   * 'presses')`): the document's pointerdown in the bubbling phase, so the
+   * pressed node and its ancestors heard it first (their stopPropagation
+   * keeps it from here), for a press inside the container or another
+   * delegation root of this host (a portal's target), not in a nested
+   * root's own nodes. In a shadow root the document cannot see into, the
+   * root's own pointerdown notes the path first.
+   * @param {any} node the container @param {(event: any) => void} handler
+   */
+  const pressing = (node, handler) => {
+    const d = node.ownerDocument ?? doc;
+    const top = typeof node.getRootNode === 'function' ? node.getRootNode() : d;
+    const shadow = top !== d && top.host != null ? top : null;
+    /** The path each press had inside the shadow root. @type {WeakMap<any, any[]>} */
+    const inner = new WeakMap();
+    /** @param {any} e */
+    const note = e => void inner.set(e, e.composedPath());
+    /** @param {any} e */
+    const listener = e => {
+      for (const n of inner.get(e) ?? e.composedPath()) {
+        if (n === node || roots.has(n)) return void handler(e);
+        if (n.nodeType === 1 && n.hasAttribute('data-ren-root')) return;
+      }
+    };
+    shadow?.addEventListener('pointerdown', note);
+    d.addEventListener('pointerdown', listener);
+    return () => {
+      shadow?.removeEventListener('pointerdown', note);
+      d.removeEventListener('pointerdown', listener);
     };
   };
   /**
@@ -2914,6 +3245,8 @@ function make(document, options, mode) {
           node[LEAF] = true;
           // Its caret's drawn row, as the canvases' Edit answers it.
           node.caretRow = caretRow;
+          // Its field's actions, for an application's own menu.
+          node[EDIT] = new Field(node);
         }
         // An image the browser would drag natively (its ghost takes the pointer from a swipe): the canvases drag none.
         else if (tag === 'Image') node.setAttribute('draggable', 'false');
@@ -2964,6 +3297,7 @@ function make(document, options, mode) {
       if (name === 'resize') return sized(node, handler);
       if (name === 'keys') return rooted(node, handler);
       if (name === 'scrolls') return scrolled(node, handler);
+      if (name === 'presses') return pressing(node, handler);
       if (name === 'move') return moving(node, handler);
       // A primitive's drop and drag are ren-core's (`{ files }`, `{ files, types }`); an HTML element keeps the DOM's own.
       if (name === 'drop' && roles.has(node)) return dropped(node, handler);
@@ -3029,6 +3363,8 @@ function make(document, options, mode) {
       if (count === 0) {
         for (const event of keys.keys()) target.addEventListener(event, dispatch, activeFor(event));
         target.addEventListener('dragstart', undrag);
+        target.addEventListener('mousedown', unpress);
+        unholds.set(target, texted(target));
         if (!behavior.menu || !behavior.editMenu) target.addEventListener('contextmenu', unmenu);
         if (!behavior.selectAll) guards.set(target, unselect(target));
       }
@@ -3042,6 +3378,9 @@ function make(document, options, mode) {
           roots.delete(target);
           for (const event of keys.keys()) target.removeEventListener(event, dispatch);
           target.removeEventListener('dragstart', undrag);
+          target.removeEventListener('mousedown', unpress);
+          unholds.get(target)?.();
+          unholds.delete(target);
           target.removeEventListener('contextmenu', unmenu);
           guards.get(target)?.();
           guards.delete(target);

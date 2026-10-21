@@ -383,6 +383,16 @@ composed), and take a scroll of the page, of an element around the
 container or of one inside it; a sibling's scroll moves nothing of the
 view and is left out. The handler gets the DOM's `Event`.
 
+Root-wide presses (ren-core's `$presses`, `listen(container, 'presses')`)
+listen on the document for `pointerdown` in the bubbling phase, so the
+pressed node and its ancestors hear it first (their `stopPropagation`
+keeps it from the root), and on the view's shadow root too for `$shadow`
+(a closed one hides its nodes from the document's path). They take a
+press, of any button or pointer, inside the view's container or another
+delegation root of the host (a portal's target), but not in a nested
+root's own nodes. The handler gets the DOM's `PointerEvent`, so ren-core's
+`textAt` reads the text under it.
+
 A node's moves (ren-core's `$moves`, `listen(node, 'move')`) are
 heard by an IntersectionObserver whose root is the document and whose root
 margin leaves exactly the node's box (from the root's `clientWidth` and
@@ -400,6 +410,39 @@ is the window's `innerWidth` and `innerHeight`, as CSS media queries read
 them, with its `prefers-color-scheme: dark` and `prefers-reduced-motion:
 reduce` from `matchMedia`; the host listens to the window's `resize` and
 those queries' `change` only while a view reads it.
+
+## Text actions
+
+What an application's own menus do to text (ren-core's `EDIT`, `TEXT`,
+`editOf`, `textAt`, `selectText`, `selectedText`):
+
+- An Edit's element holds its field's actions under `EDIT`. `replace`
+  puts text over the selection as a user's edit: in the focused field the
+  browser's `insertText` (`delete` for an empty text), so its undo keeps it
+  and its `input` fires; unfocused, or where the browser refuses it,
+  `setRangeText` and an `input` event, so `onChange` hears it either way.
+  A one-line field drops line breaks; a read-only or disabled one takes
+  nothing. `undo` and `redo` focus the field and run the browser's own,
+  telling whether it stepped; the DOM tells nothing of the history, so
+  `canUndo` and `canRedo` are true. `selectAll` is the field's `select()`;
+  `secret` is a password field.
+- The document (or the shadow root a `$shadow` root renders into) holds
+  the static text's actions under `TEXT` while a view is there. Static
+  text is a Label's: `at` finds the Label holding the text node the
+  browser places a caret in under the event's point
+  (`caretPositionFromPoint`, else `caretRangeFromPoint`) when that text's
+  boxes hold the point, else the Label around the event's target; none
+  over a field or a press target (an Action, a button, a link,
+  `role="button"`) or a Label with no text. `select` gives the Label
+  `user-select: text` (and `-webkit-`) and `cursor: text` inline and
+  selects all of it, so a drag inside it keeps a part; a press outside it,
+  Escape (which also clears the selection in it), the next `select` or
+  its release puts its own inline values back. `selected` is a focused
+  field's selection (none of a password field's), else the page's.
+- A right press in an Edit where an application's own menu is in charge
+  (the Edit or an element around it has `prevent="contextmenu"`) has its
+  `mousedown` cancelled, so the field keeps its selection (Chrome would
+  move the caret to the press) for the menu's Cut and Copy.
 
 ## Compiled templates
 
@@ -446,7 +489,13 @@ npm test           # declarations, tsc --checkJs --strict, the TypeScript consum
   multi-node rows and positional For.
 - `test/events.test.jsx` covers delegation (bubbling order, `currentTarget`,
   `stopPropagation`, portals, nested roots, a closed shadow root, direct
-  non-bubbling events, disposal).
+  non-bubbling events, disposal) and the root-wide keys, scrolls and
+  presses.
+- `test/text.test.jsx` covers the text actions: an Edit's (`replace`
+  focused and not, line breaks, read-only, undo and redo, select all), a
+  document's and a shadow root's (the Label under a pointer, none over a
+  field or a press, selection opened and released, the text selected
+  now), and the right press kept from moving a field's selection.
 - `test/template.test.js` covers compiled templates on the DOM (the same DOM
   as the runtime path, nested dynamic parts, per-document clones, the
   Host-call build, owned lists, the worker's clones) and text bindings.

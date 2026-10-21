@@ -7,7 +7,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { $signal, $read, $write, $dispose, $catch } from 'rrx-core';
-import { Root, For, Portal, Recover, Show, $keys, $scrolls, $active, View, Edit, Scroll, Action } from 'ren-core';
+import { Root, For, Portal, Recover, Show, $keys, $scrolls, $presses, $active, View, Edit, Scroll, Action, Label } from 'ren-core';
 import { render, $dom, $shadow } from 'ren-dom';
 
 /** Windows to close and prototypes to restore after each test. */
@@ -446,5 +446,80 @@ describe('ren-core event delegation', () => {
     assert.equal(t.on(box.getRootNode(), 'scroll'), 1, 'the shadow root listens too');
     $dispose(root);
     assert.equal(t.targets('scroll'), 0);
+  });
+
+  it('hears the presses of its root and its portals with $presses, after the pressed item, not a nested root\'s or outside', () => {
+    const t = setup();
+    const { window, document } = t;
+    const layer = document.createElement('section');
+    document.body.appendChild(layer);
+    /** @type {string[]} */
+    const seen = [];
+    let stopping = false;
+    const root = Root({
+      id: 'presser',
+      target: t.container,
+      renderer: $dom(document, { styles: false }),
+      children: () => {
+        $presses(e => seen.push(`root:${e.button}:${e.pointerType}:${e.clientX}:${e.target.textContent}`));
+        return (
+          <View onPointerDown={e => {
+            seen.push('view');
+            if (stopping) /** @type {any} */ (e).stopPropagation();
+          }}>
+            <Label text="words" />
+            <Portal into={layer}><Action text="over" /></Portal>
+            <Root id="nested">{() => <Label text="nested" />}</Root>
+          </View>
+        );
+      },
+    });
+    /** A pointer press at `target`. @param {any} target @param {Record<string, any>} [init] */
+    const press = (target, init = {}) => target.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true, button: 0, pointerType: 'mouse', clientX: 7, ...init }));
+    const host = t.container.querySelector('[data-ren-root="presser"]');
+    press(host.querySelector('[data-ren="Label"]'), { button: 2 });
+    assert.deepEqual(seen, ['view', 'root:2:mouse:7:words'], 'the pressed item first, then the root, with the native event');
+    press(layer.querySelector('[data-ren="Action"]'), { pointerType: 'touch' });
+    assert.deepEqual(seen.slice(2), ['root:0:touch:7:over'], "a portal's press is the root's");
+    press(host.querySelector('[data-ren-root="nested"] [data-ren="Label"]'));
+    assert.deepEqual(seen.slice(3), ['view'], "a nested root's own press is not");
+    const outside = document.createElement('p');
+    document.body.appendChild(outside);
+    press(outside);
+    press(document.body);
+    assert.equal(seen.length, 4, 'nothing outside the root');
+    stopping = true;
+    press(host.querySelector('[data-ren="Label"]'));
+    assert.deepEqual(seen.slice(4), ['view'], "a handler's stopPropagation keeps it from the root");
+    assert.equal(t.on(document, 'pointerdown'), 1);
+    $dispose(root);
+    assert.equal(t.on(document, 'pointerdown'), 0, 'removed with the root');
+  });
+
+  it('hears the presses inside a closed shadow root with $presses, which the document cannot see into', () => {
+    const t = setup();
+    const { window, document } = t;
+    /** @type {string[]} */
+    const seen = [];
+    /** @type {any} */
+    let label = null;
+    const root = Root({
+      id: 'closed-presses',
+      target: t.container,
+      renderer: $shadow({ mode: 'closed', styles: false }),
+      children: () => {
+        $presses(e => seen.push(e.composedPath()[0] === label ? 'label' : 'other'));
+        return <View><Label ref={el => (label = el)} text="in" /></View>;
+      },
+    });
+    const shadow = label.getRootNode();
+    const e = new window.PointerEvent('pointerdown', { bubbles: true, composed: true });
+    const path = e.composedPath.bind(e);
+    const outside = () => e.currentTarget === document || e.currentTarget === document.body || e.currentTarget === document.documentElement || e.currentTarget === window;
+    Object.defineProperty(e, 'composedPath', { value: () => (outside() ? path().slice(path().indexOf(t.container)) : path()) });
+    label.dispatchEvent(e);
+    assert.equal(seen.length, 1, 'a press inside the closed root is its');
+    $dispose(root);
+    assert.equal(t.on(shadow, 'pointerdown'), 0, 'the shadow root stops listening with the root');
   });
 });

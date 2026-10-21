@@ -304,6 +304,77 @@ describe('ren dom text actions', () => {
     release();
   });
 
+  it('selects the word under a double press and all of the text under a triple, a drag after one extending by characters', () => {
+    const { document, container } = setup();
+    render(() => <View><Action><Label text="first words here" /></Action></View>, container);
+    const label = container.querySelector('[data-ren="Label"]');
+    // The browser's caret: in the text at the point's x as its offset.
+    /** @type {any} */ (document).caretPositionFromPoint = (/** @type {number} */ x) => ({ offsetNode: label.firstChild, offset: x });
+    const release = /** @type {() => void} */ (selectText(label));
+    const selection = document.getSelection();
+    assert.equal(point(label, 'pointerdown', { clientX: 8, buttons: 1, detail: 2 }).defaultPrevented, true);
+    assert.equal(String(selection), 'words', 'the word under the press');
+    point(label, 'pointermove', { clientX: 14, buttons: 1 });
+    assert.equal(String(selection), 'words he', 'a drag after it: the word and on by characters');
+    point(label, 'pointermove', { clientX: 2, buttons: 1 });
+    assert.equal(String(selection), 'rst words', 'back past the word: from its end');
+    point(label, 'pointerup', { clientX: 2 });
+    point(label, 'pointerdown', { clientX: 5, buttons: 1, detail: 2 });
+    point(label, 'pointerup', { clientX: 5 });
+    assert.equal(String(selection), ' ', 'the run of other characters under it');
+    point(label, 'pointerdown', { clientX: 3, buttons: 1, detail: 3 });
+    point(label, 'pointerup', { clientX: 3 });
+    assert.equal(String(selection), 'first words here', 'a triple press: all of it');
+    point(label, 'pointerdown', { clientX: 3, buttons: 1, detail: 1 });
+    assert.equal(String(selection), '', 'a single press: a caret');
+    point(label, 'pointerup', { clientX: 3 });
+    // A browser's pointerdown carries no count: its own presses close in time and place are counted.
+    /** @param {number} x */
+    const trusted = x => {
+      const e = new document.defaultView.PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: 10, buttons: 1 });
+      Object.defineProperty(e, 'isTrusted', { value: true });
+      label.dispatchEvent(e);
+      point(label, 'pointerup', { clientX: x });
+    };
+    trusted(13);
+    trusted(14);
+    assert.equal(String(selection), 'here', "the browser's second press: a double press");
+    release();
+  });
+
+  it('swallows a dblclick on an opened text, so what holds it never hears it, until it is released', () => {
+    const { document, container } = setup();
+    render(() => <View><View role="button"><Label text="row text" /></View></View>, container);
+    const label = container.querySelector('[data-ren="Label"]');
+    let opened = 0;
+    label.parentNode.addEventListener('dblclick', () => opened++);
+    const double = () => label.dispatchEvent(new document.defaultView.MouseEvent('dblclick', { bubbles: true, cancelable: true, composed: true, detail: 2 }));
+    selectText(label);
+    assert.equal(double(), false, 'cancelled');
+    assert.equal(opened, 0, 'the row never hears it');
+    document.dispatchEvent(new document.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(double(), true);
+    assert.equal(opened, 1, 'released: the row hears it');
+  });
+
+  it('finds a press target across a shadow root: a Label in a $shadow root inside an Action is pressed', () => {
+    const { container } = setup();
+    /** @type {any} */
+    let host = null;
+    render(() => <View><Action><View ref={(/** @type {any} */ el) => (host = el)} /></Action></View>, container);
+    /** @type {any} */
+    let label = null;
+    const root = Root({
+      id: 'pressed',
+      target: host,
+      renderer: $shadow({ mode: 'open' }),
+      children: () => <View><Label ref={(/** @type {any} */ el) => (label = el)} text="inside" /></View>,
+    });
+    assert.equal(label.getRootNode().host != null, true, 'in a shadow root');
+    assert.deepEqual(textAt(point(label, 'pointerdown')), { node: label, text: 'inside', pressed: true });
+    $dispose(root);
+  });
+
   it('opens selection on a text and selects all of it, until a press outside it, Escape or its release', () => {
     const { document, container } = setup();
     const root = Root({

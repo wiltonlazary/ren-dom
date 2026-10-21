@@ -1316,15 +1316,91 @@ const holds = (doc, text, x, y) => {
 };
 
 /**
+ * The nearest element from `el` out that matches `selector`, walking out
+ * across shadow roots to their hosts (`closest` stops at a shadow root);
+ * else null.
+ * @param {any} el @param {string} selector
+ */
+const outward = (el, selector) => {
+  for (let n = el; n != null; n = n.parentNode ?? n.host) if (n.nodeType === 1 && n.matches(selector)) return n;
+  return null;
+};
+
+/** Word boundaries for a double press, as a browser finds them (ICU's). */
+const WORDS = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
+/** How close two presses are to count as a run of clicks, in ms and px: the platforms' defaults, as ren-canv's. */
+const CLICK_MS = 500;
+const CLICK_PX = 4;
+
+/**
+ * Where a caret in `node` falls in its text, as an offset into it; 0
+ * where the range cannot tell (a caret in another tree).
+ * @param {any} doc @param {any} node @param {{ node: any, offset: number }} caret
+ */
+const offsetOf = (doc, node, caret) => {
+  try {
+    const range = doc.createRange();
+    range.setStart(node, 0);
+    range.setEnd(caret.node, caret.offset);
+    return range.toString().length;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * The caret at an offset into `node`'s text: in the text node holding it,
+ * else at `node`'s end.
+ * @param {any} doc @param {any} node @param {number} offset
+ * @returns {{ node: any, offset: number }}
+ */
+const caretOf = (doc, node, offset) => {
+  const walker = doc.createTreeWalker(node, 4);
+  /** @type {any} */
+  let last = null;
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    if (offset <= n.data.length) return { node: n, offset };
+    offset -= n.data.length;
+    last = n;
+  }
+  return last !== null ? { node: last, offset: last.data.length } : { node, offset: node.childNodes.length };
+};
+
+/**
+ * The word (or the run of other characters) a double press at a caret
+ * offset selects in `node`'s text, as [from, to): the segment holding the
+ * character under the point, the one before the caret when its box holds
+ * the point (its right half), else the one after it.
+ * @param {any} doc @param {any} node @param {string} text @param {number} at @param {any} e
+ * @returns {[number, number]}
+ */
+const wordAt = (doc, node, text, at, e) => {
+  if (WORDS === null || text === '') return [0, text.length];
+  let i = Math.min(at, text.length - 1);
+  if (at > 0) {
+    const range = doc.createRange();
+    const from = caretOf(doc, node, at - 1);
+    const to = caretOf(doc, node, at);
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    const rects = typeof range.getClientRects === 'function' ? range.getClientRects() : null;
+    if (rects != null) for (const r of rects) if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) i = at - 1;
+  }
+  const segment = WORDS.segment(text).containing(i);
+  return segment === undefined ? [0, text.length] : [segment.index, segment.index + segment.segment.length];
+};
+
+/**
  * The static text `el` holds as its own: a Label, or a button whose text
- * is its own (a text node of its, no Label in it); else null.
+ * is its own (a text node of its, no Label in it); else null. Both are
+ * found across shadow roots.
  * @param {any} el
  */
 const textual = el => {
-  if (el == null || typeof el.closest !== 'function') return null;
-  const label = el.closest(LABELS);
+  if (el == null || el.nodeType !== 1) return null;
+  const label = outward(el, LABELS);
   if (label != null) return label;
-  const button = el.closest(BUTTONS);
+  const button = outward(el, BUTTONS);
   if (button == null || button.querySelector(LABELS) != null) return null;
   for (const n of button.childNodes) if (n.nodeType === 3 && n.data.trim() !== '') return button;
   return null;
@@ -1341,8 +1417,10 @@ const textual = el => {
  * all of it, until a press outside it, Escape (which also clears the
  * selection in it) or the release, and holds the presses inside it: a
  * primary one drags a selection of a part (a browser drags none inside a
- * button) and its click never reaches what holds the text, a right one
- * keeps the selection; `selected` is a focused field's selection (none of a
+ * button) and its click never reaches what holds the text, a double one
+ * selects the word there and a triple all of it (a drag after either
+ * extends by characters, and their dblclick never reaches what holds the
+ * text either), a right one keeps the selection; `selected` is a focused field's selection (none of a
  * password's), else the page's.
  * @param {any} top a document or a shadow root
  * @returns {{ actions: TextActions, close: () => void }}
@@ -1370,7 +1448,7 @@ function textActions(top) {
       label ??= textual(target);
       if (label == null) return null;
       const text = label.textContent ?? '';
-      return text === '' ? null : { node: label, text, pressed: label.closest(PRESSES) != null };
+      return text === '' ? null : { node: label, text, pressed: outward(label, PRESSES) != null };
     },
     select(node) {
       open?.();
@@ -1390,31 +1468,62 @@ function textActions(top) {
       const inside = e => e.composedPath().includes(node) || (closed && around(e.target, node));
       /** Where the held drag started, as a caret in the text. @type {{ node: any, offset: number } | null} */
       let anchor = null;
+      /** The word or whole a double or triple press selected, as offsets into the text, which its drag keeps. @type {[number, number] | null} */
+      let span = null;
+      /** The last primary press inside, for a run of clicks: when, where and its count. */
+      let last = { at: -Infinity, x: 0, y: 0, count: 0 };
       /** A primary press inside is held, up to its release. */
       let held = false;
       /** The click a held drag's release fires comes next. */
       let swallow = false;
-      /** Selects from the anchor to the caret under the event's point. @param {any} e */
+      /** Selects from the anchor to the caret under the event's point; after a double or triple press, its span and on by characters. @param {any} e */
       const drag = e => {
         const now = doc.getSelection?.() ?? null;
         const focus = caretIn(doc, top, node, e);
         if (now === null) return;
-        if (anchor === null || focus === null) now.removeAllRanges();
+        if (span !== null) {
+          const at = focus === null ? span[0] : offsetOf(doc, node, focus);
+          const base = caretOf(doc, node, at < span[0] ? span[1] : span[0]);
+          const extent = caretOf(doc, node, at < span[0] ? at : Math.max(at, span[1]));
+          now.setBaseAndExtent(base.node, base.offset, extent.node, extent.offset);
+        } else if (anchor === null || focus === null) now.removeAllRanges();
         else now.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+      };
+      /**
+       * A primary press's place in its run of clicks: its `detail` when more than 1, else, a pointerdown carrying
+       * none (0 in Chrome), one more than the last press's when it is close in time and place; one for a press made
+       * by code.
+       * @param {any} e
+       */
+      const counted = e => {
+        const x = e.clientX ?? 0;
+        const y = e.clientY ?? 0;
+        let count = (e.detail ?? 0) > 1 ? e.detail : 1;
+        if (count === 1 && e.isTrusted === true && e.timeStamp - last.at <= CLICK_MS && Math.abs(x - last.x) <= CLICK_PX && Math.abs(y - last.y) <= CLICK_PX) count = last.count + 1;
+        last = { at: e.timeStamp, x, y, count };
+        return count;
       };
       /** @param {any} e */
       const press = e => {
         swallow = false;
         if (!inside(e)) return void release();
         // A right press keeps the selection, for a menu.
-        if ((e.button ?? 0) !== 0) return;
+        if ((e.button ?? 0) !== 0) return void (last.count = 0);
         // A primary press selects, never presses what holds the text (a button, a row): the drag is held here, since
         // a browser drags no selection inside a button. It starts a selection of a part where it lands (Shift extends
-        // the one there), so the selected whole never drags.
+        // the one there), so the selected whole never drags; a double press selects the word there, a triple all of it.
         e.preventDefault();
         e.stopPropagation();
+        const count = counted(e);
         const now = doc.getSelection?.() ?? null;
-        anchor = e.shiftKey && now?.anchorNode != null && around(node, now.anchorNode) ? { node: now.anchorNode, offset: now.anchorOffset } : caretIn(doc, top, node, e);
+        span = null;
+        if (e.shiftKey && now?.anchorNode != null && around(node, now.anchorNode)) anchor = { node: now.anchorNode, offset: now.anchorOffset };
+        else {
+          anchor = caretIn(doc, top, node, e);
+          const text = node.textContent ?? '';
+          if (count >= 3) span = [0, text.length];
+          else if (count === 2 && anchor !== null) span = wordAt(doc, node, text, offsetOf(doc, node, anchor), e);
+        }
         held = true;
         drag(e);
       };
@@ -1446,12 +1555,19 @@ function textActions(top) {
         e.preventDefault();
         e.stopPropagation();
       };
+      // A double press selects a word: its dblclick never reaches what holds the text (a row that opens).
+      /** @param {any} e */
+      const double = e => {
+        if (!inside(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+      };
       /** @param {any} e */
       const start = e => {
         if (held && inside(e)) e.preventDefault();
       };
       /** @type {[string, (e: any) => void][]} */
-      const listeners = [['pointerdown', press], ['pointermove', move], ['pointerup', up], ['pointercancel', up], ['click', click], ['mousedown', down], ['selectstart', start]];
+      const listeners = [['pointerdown', press], ['pointermove', move], ['pointerup', up], ['pointercancel', up], ['click', click], ['dblclick', double], ['mousedown', down], ['selectstart', start]];
       /** @param {any} e */
       const key = e => {
         swallow = false;

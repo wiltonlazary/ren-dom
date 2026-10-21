@@ -435,7 +435,8 @@ What an application's own menus do to text (ren-core's `EDIT`, `TEXT`,
   (`caretPositionFromPoint`, else `caretRangeFromPoint`) when that text's
   boxes hold the point, else the one around the event's target, with
   `pressed` true inside a press target (an Action, a button, a link,
-  `role="button"`) and for a button's own text; none inside a field (an
+  `role="button"`, found across shadow roots, so a `$shadow` root inside a
+  button is in it) and for a button's own text; none inside a field (an
   input, a textarea, a select, `contenteditable`) or over no text.
   `select` gives the Label or button `user-select: text` (and
   `-webkit-`) and `cursor: text` inline and selects all of it. While it is open, its presses select and never press
@@ -444,7 +445,12 @@ What an application's own menus do to text (ren-core's `EDIT`, `TEXT`,
   lands (Shift extends the one there), its drag selects up to the caret
   under the pointer (held by the document, since a browser drags no
   selection inside a button; a point past the text stops at its start or
-  end), and the `click` of its release is swallowed; a right press inside
+  end), and the `click` of its release is swallowed; a double press
+  selects the word under it (`Intl.Segmenter`'s, or the run of other
+  characters there) and a triple all of the text (the run counted from
+  `detail`, else by time and place, as a pointerdown carries none), a drag
+  after either extends by characters, and its `dblclick` never reaches what
+  holds the text; a right press inside
   keeps the selection, for a menu. A press outside it, Escape (which also
   clears the selection in it), the next `select` or its release ends this
   and puts its own inline values back. `selected` is a focused field's

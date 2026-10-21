@@ -1339,7 +1339,12 @@ function textActions(top) {
       const closed = node.getRootNode?.()?.mode === 'closed';
       /** @param {any} e */
       const press = e => {
-        if (e.composedPath().includes(node) || (closed && around(e.target, node))) return;
+        if (e.composedPath().includes(node) || (closed && around(e.target, node))) {
+          // A primary press inside starts a selection of a part where it lands: the selected text would drag as a
+          // whole (and a drag is cancelled here), leaving nothing selected. A right press keeps it for a menu.
+          if ((e.button ?? 0) === 0 && !e.shiftKey) (doc.getSelection?.() ?? null)?.removeAllRanges();
+          return;
+        }
         release();
       };
       /** @param {any} e */

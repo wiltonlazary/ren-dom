@@ -221,8 +221,11 @@ describe('ren dom text actions', () => {
     assert.deepEqual([label.style.getPropertyValue('user-select'), label.style.getPropertyValue('cursor')], ['text', 'text']);
     assert.equal(String(document.getSelection()), 'pick me', 'all of it selected');
     assert.equal(selectedText(label), 'pick me');
+    point(label, 'pointerdown', { button: 2 });
+    assert.equal(String(document.getSelection()), 'pick me', 'a right press inside keeps the selection, for a menu');
     point(label, 'pointerdown');
     assert.equal(label.style.getPropertyValue('user-select'), 'text', 'a press inside keeps it open');
+    assert.equal(String(document.getSelection()), '', 'a primary press inside starts a new selection where it lands (no drag of the whole)');
     point(other, 'pointerdown');
     assert.deepEqual([label.style.getPropertyValue('user-select'), label.style.getPropertyValue('cursor')], before, 'a press outside releases it');
     release();

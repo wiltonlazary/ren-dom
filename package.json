@@ -1,6 +1,6 @@
 {
   "name": "ren-dom",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "The fine-grained DOM renderer for ren-core: light DOM (`$dom`) and shadow root (`$shadow`) hosts, event delegation and compiled template cloning.",
   "type": "module",
   "license": "MIT",

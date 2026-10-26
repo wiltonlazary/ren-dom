@@ -6,7 +6,7 @@
 // heights and paddings ren-dom wrote for it (the test checks ren-dom still
 // writes them, so the heights are still ren-dom's).
 // Run it under the machine-wide Chrome lock and commit what it writes:
-//   flock "$HOME/.cache/chrome-bench.lock" node scripts/heights-oracle.mjs test/fixtures/heights.json
+//   flock -w 1800 "$HOME/.cache/chrome-bench.lock" node scripts/heights-oracle.mjs test/fixtures/heights.json
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';

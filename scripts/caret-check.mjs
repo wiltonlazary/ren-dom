@@ -5,7 +5,7 @@
 // boxes of each grapheme in a hidden copy of the field (as ren-canv's
 // scripts/rows-oracle.mjs reads them), the caret at a wrap on the next row.
 // It exits 1 on a difference. Run it under the machine-wide Chrome lock:
-//   flock "$HOME/.cache/chrome-bench.lock" node scripts/caret-check.mjs
+//   flock -w 1800 "$HOME/.cache/chrome-bench.lock" node scripts/caret-check.mjs
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { build } from 'esbuild';

@@ -105,6 +105,32 @@ describe('ren-core list reconciler', () => {
     assert.equal(t.text(), next.join(','));
   });
 
+  it('keeps the focus inside a row it moves', () => {
+    const t = setup();
+    const root = $root('app');
+    const items = $signal(root, [0, 1, 2]);
+    render(() => (
+      <ul>
+        <For each={items}>{item => <li><button>{String(item())}</button></li>}</For>
+      </ul>
+    ), t.container, { root });
+    const ul = t.container.querySelector('ul');
+    const row = ul.children[2];
+    const button = row.firstChild;
+    button.focus();
+    $write(items, [2, 0, 1]);
+    assert.ok(ul.children[0] === row, 'the focused row is the one moved');
+    assert.ok(t.document.activeElement === button, 'the focus stays on the button');
+    // Where the browser has moveBefore, the row moves with it.
+    const moved = [];
+    ul.moveBefore = (child, before) => {
+      moved.push(child);
+      ul.insertBefore(child, before);
+    };
+    $write(items, [0, 1, 2]);
+    assert.ok(moved.length === 1 && moved[0] === row && ul.children[2] === row);
+  });
+
   it('reverses with n - 1 moves', () => {
     const t = table(10);
     $write(t.items, $read(t.items).slice().reverse());

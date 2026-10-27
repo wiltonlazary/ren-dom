@@ -311,7 +311,9 @@ nodes holding the focus, it blurs the focused element first, so its
 ancestors hear a bubbling `focusout` (`relatedTarget` null), once, as on
 ren-canv: a wrapper hears the focus leave it. A hidden element hears its
 `blur` first; a removed one hears nothing (ren-core drops its handlers
-before it goes), though Chrome fires its blur.
+before it goes), though Chrome fires its blur. A node ren-dom moves (a keyed
+row) keeps the focus it holds: it moves with `moveBefore` where the browser
+has it, else the focused element takes the focus back once in place.
 
 On a primitive, `onDrop`, `onDragEnter`, `onDragOver` and `onDragLeave` are
 ren-core's portable ones, mapped from the DOM's own: a drop's `files` (its

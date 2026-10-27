@@ -2108,6 +2108,17 @@ function trapAround(parent, child) {
 }
 
 /**
+ * The focused element inside `node` (through the shadow roots it holds), else null.
+ * @param {any} node
+ */
+function holding(node) {
+  let active = node.getRootNode().activeElement;
+  if (active == null || !node.contains(active)) return null;
+  while (active.shadowRoot?.activeElement != null) active = active.shadowRoot.activeElement;
+  return active;
+}
+
+/**
  * The focus goes back into a trap whose focused element was removed: its
  * first focusable, else the trap itself when it takes the focus (a
  * `tabindex`), as the canvases do; unless something focused another
@@ -3691,7 +3702,14 @@ function make(document, options, mode) {
     },
     insert(parent, child, before) {
       if (parent[LEAF] === true) return;
-      parent.insertBefore(child, before);
+      // A node moved (a keyed row) keeps the focus it holds: insertBefore blurs it, moveBefore does not.
+      const active = child.isConnected ? holding(child) : null;
+      if (active === null) parent.insertBefore(child, before);
+      else if (typeof parent.moveBefore === 'function' && parent.isConnected) parent.moveBefore(child, before);
+      else {
+        parent.insertBefore(child, before);
+        if (active.isConnected) active.focus({ preventScroll: true });
+      }
       // A nested root's host element: what this root's behavior turns off stops at it, unless it sets its own.
       if (switched.length > 0 && child.nodeType === 1 && child.hasAttribute('data-ren-root'))
         for (const [, , on] of switched) for (const name in on) if (child.style.getPropertyValue(name) === '') child.style.setProperty(name, on[name]);

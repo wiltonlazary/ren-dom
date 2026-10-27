@@ -2096,14 +2096,21 @@ const TRAP = Symbol('ren.trap');
 let traps = 0;
 
 /**
- * The focus trap a removal takes the focus from: the nearest trap around
- * `parent` when `child` is or holds the focused element, else null.
- * @param {any} parent @param {any} child
+ * The focus trap a removal or a hide takes the focus from: the nearest trap
+ * around `parent` when a node of `first` to `last` (its siblings, in order)
+ * is or holds the focused element, else null.
+ * @param {any} parent @param {any} first @param {any} [last]
  */
-function trapAround(parent, child) {
+function trapAround(parent, first, last = first) {
   const active = parent.getRootNode?.().activeElement;
-  if (active == null || !(child === active || child.contains?.(active))) return null;
-  for (let n = parent; n != null; n = n.parentNode) if (n[TRAP] === true) return n;
+  if (active == null || !parent.contains?.(active)) return null;
+  for (let n = first; n != null; n = n.nextSibling) {
+    if (n === active || n.contains?.(active)) {
+      for (let p = parent; p != null; p = p.parentNode) if (p[TRAP] === true) return p;
+      return null;
+    }
+    if (n === last) break;
+  }
   return null;
 }
 
@@ -3285,10 +3292,13 @@ function make(document, options, mode) {
     }
     if (role !== undefined) {
       if (name === 'hidden') {
+        // The focus trap around a hidden focused element takes the focus back.
+        const trap = value && traps > 0 && node.parentNode !== null ? trapAround(node.parentNode, node) : null;
         if (value && node.parentNode !== null) release(node.parentNode, node, node);
         node[HIDE] = !!value;
         // Shown again, it takes back the display it had (its base's, its style's, a clamp's).
         node.style.display = value ? 'none' : displayOf(node, (flow === null ? BASES : POSITIONED_BASES)[role] ?? '');
+        if (trap !== null) refocus(trap);
         return;
       }
       if (role === 'Edit') {
@@ -3639,6 +3649,8 @@ function make(document, options, mode) {
     clear(parent, first, last) {
       // The last node's mirror goes with it.
       if (mirrored && last[MIRROR] !== undefined && last.nextSibling === last[MIRROR].box) last = last[MIRROR].box;
+      // The focus trap around a removed focused element takes the focus back.
+      const trap = traps > 0 ? trapAround(parent, first, last) : null;
       release(parent, first, last);
       if (flow !== null)
         for (let n = first; n !== null; n = n.nextSibling) {
@@ -3652,6 +3664,7 @@ function make(document, options, mode) {
         range.setEndAfter(last);
         range.deleteContents();
       }
+      if (trap !== null) refocus(trap);
     },
     fill(element, text, keep) {
       // A text that stays bound is made and kept; a static one is set.

@@ -567,6 +567,30 @@ describe('ren dom portable style', () => {
     $dispose(root);
   });
 
+  it('takes the focus back into a trap when a range of nodes, or a node hidden, holding the focus goes', () => {
+    const { container, document } = setup();
+    const root = $root('trap');
+    const many = $signal(root, true);
+    const hide = $signal(root, false);
+    render(() => (
+      <View trap>
+        <Action text="first" />
+        {() => ($read(many) ? [<Action text="a" />, <Action text="b" />] : null)}
+        <View hidden={() => $read(hide)}>
+          <Action text="inner" />
+        </View>
+      </View>
+    ), container, { root });
+    const button = (/** @type {string} */ text) => [...container.querySelectorAll('button')].find(n => n.textContent === text);
+    button('b').focus();
+    $write(many, false);
+    assert.ok(document.activeElement === button('first'), 'a range removed: the trap\'s first focusable');
+    button('inner').focus();
+    $write(hide, true);
+    assert.ok(document.activeElement === button('first'), 'hidden: the trap\'s first focusable');
+    $dispose(root);
+  });
+
   it('focuses the first or last focusable inside a trap with $focus, as Tab cycles', () => {
     const { container, document } = setup();
     /** @type {any} */

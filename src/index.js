@@ -2126,7 +2126,7 @@ function holding(node) {
 }
 
 /**
- * The focus goes back into a trap whose focused element was removed: its
+ * The focus goes back into a trap whose focused element was removed or hidden: its
  * first focusable, else the trap itself when it takes the focus (a
  * `tabindex`), as the canvases do; unless something focused another
  * element meanwhile.

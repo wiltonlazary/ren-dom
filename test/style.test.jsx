@@ -4,6 +4,8 @@
 
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { Window as HappyWindow } from 'happy-dom';
 import { $root, $signal, $read, $write, $dispose } from 'rrx-core';
 import { View, Layout, Scroll, Label, Edit, Action, Shape, Image, Root, Recover, $focus, $active } from 'ren-core';
@@ -475,6 +477,59 @@ describe('ren dom portable style', () => {
     assert.deepEqual(heard, ['120x30']);
     $write(on, false);
     assert.equal(observer.nodes.length, 0, 'unobserved when it goes');
+  });
+
+  it('lets a node observed for onResize be collected once it is no longer heard: the shared observer keeps none', async () => {
+    setFlagsFromString('--expose-gc');
+    const gc = runInNewContext('gc');
+    const { document } = setup();
+    const host = $dom(document);
+    /** @type {any[]} */
+    const observers = [];
+    // A plain-object node and observer: happy-dom keeps nodes of its own.
+    class Observer {
+      /** @param {any} fn */
+      constructor(fn) {
+        this.fn = fn;
+        this.nodes = new Set();
+        observers.push(this);
+      }
+      /** @param {any} node */
+      observe(node) {
+        this.nodes.add(node);
+      }
+      /** @param {any} node */
+      unobserve(node) {
+        this.nodes.delete(node);
+      }
+    }
+    const view = { ResizeObserver: Observer };
+    // Finalization reports the collected node; GC itself has no event to await.
+    /** @type {Set<string>} */
+    const freed = new Set();
+    const registry = new FinalizationRegistry(/** @param {string} name */ name => freed.add(name));
+    // Made, observed (the observer made with it) and let go in a plain function, so no frame holds the node.
+    const observe = () => {
+      const node = { ownerDocument: { defaultView: view }, value: 'typed secret' };
+      registry.register(node, 'node');
+      host.listen(node, 'resize', () => {})();
+      return new WeakRef(node);
+    };
+    const ref = observe();
+    for (let i = 0; i < 20 && freed.size < 1; i++) {
+      gc();
+      await new Promise(resolve => setTimeout(resolve, 0)); // timer: poll
+    }
+    assert.ok(ref.deref() === undefined, 'the node first observed is collected while its renderer lives');
+    // the renderer (and its observer) still in use: a node observed after is heard
+    /** @type {string[]} */
+    const heard = [];
+    const next = { ownerDocument: { defaultView: view } };
+    const off = host.listen(next, 'resize', (/** @type {any} */ e) => heard.push(`${e.width}x${e.height}`));
+    assert.equal(observers.length, 1, 'one observer for the renderer');
+    observers[0].fn([{ target: next, borderBoxSize: [{ inlineSize: 4, blockSize: 2 }] }]);
+    assert.deepEqual(heard, ['4x2']);
+    off();
   });
 
   it('keeps Tab inside a trap: the last to the first and back', () => {

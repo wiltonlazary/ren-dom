@@ -2689,6 +2689,23 @@ function make(document, options, mode) {
   /** @type {any} */
   let resizer = null;
   /**
+   * The observer's callback: each node's border box to its handlers. Made here, it holds no node: a callback made in
+   * `sized` would share that call's scope, and so keep the first node observed (and what hangs from it) alive as long
+   * as the observer.
+   * @param {any[]} entries
+   */
+  const resized = entries => {
+    for (const entry of entries) {
+      const set = resizes.get(entry.target);
+      if (set === undefined) continue;
+      const border = entry.borderBoxSize?.[0] ?? entry.borderBoxSize;
+      const rect = border == null ? entry.target.getBoundingClientRect() : null;
+      const width = border != null ? border.inlineSize : rect.width;
+      const height = border != null ? border.blockSize : rect.height;
+      for (const fn of [...set]) fn({ type: 'resize', target: entry.target, currentTarget: entry.target, width, height });
+    }
+  };
+  /**
    * `onResize`: a node's border box as a ResizeObserver reports it (where the
    * window has one), once observed and after each change of size.
    * @param {any} node @param {(event: any) => void} handler
@@ -2696,18 +2713,7 @@ function make(document, options, mode) {
   const sized = (node, handler) => {
     const Observer = node.ownerDocument?.defaultView?.ResizeObserver;
     if (typeof Observer !== 'function') return () => {};
-    if (resizer === null)
-      resizer = new Observer((/** @type {any[]} */ entries) => {
-        for (const entry of entries) {
-          const set = resizes.get(entry.target);
-          if (set === undefined) continue;
-          const border = entry.borderBoxSize?.[0] ?? entry.borderBoxSize;
-          const rect = border == null ? entry.target.getBoundingClientRect() : null;
-          const width = border != null ? border.inlineSize : rect.width;
-          const height = border != null ? border.blockSize : rect.height;
-          for (const fn of [...set]) fn({ type: 'resize', target: entry.target, currentTarget: entry.target, width, height });
-        }
-      });
+    if (resizer === null) resizer = new Observer(resized);
     let set = resizes.get(node);
     if (set === undefined) {
       resizes.set(node, (set = new Set()));

@@ -407,6 +407,26 @@ describe('ren dom', () => {
     assert.equal(layer.innerHTML, '');
   });
 
+  it('closes a portal with what its regions showed after it opened', () => {
+    const { container, document } = setup();
+    const root = $root('app');
+    const open = $signal(root, true);
+    const late = $signal(root, false);
+    const layer = document.createElement('section');
+    document.body.appendChild(layer);
+    render(() => (
+      <div>
+        <Show when={open}><Portal into={layer}><Show when={late}><p>notice</p></Show></Portal></Show>
+        <Portal into={layer}><b>other</b></Portal>
+      </div>
+    ), container, { root });
+    $write(late, true);
+    assert.equal(layer.textContent, 'noticeother');
+    $write(open, false);
+    assert.equal(layer.textContent, 'other', 'the notice shown later went with its portal');
+    assert.equal(layer.querySelectorAll('p').length, 0);
+  });
+
   it('shows Pending until pending reads resolve, then keeps content', () => {
     const { container } = setup();
     const root = $root('app');

@@ -223,6 +223,44 @@ describe('ren-core event delegation', () => {
     assert.equal(t.targets('click'), 0);
   });
 
+  it("gives a focus and a focusin the browser's :focus-visible as focusVisible", () => {
+    for (const shadow of [false, true]) {
+      const t = setup();
+      /** @type {string[]} */
+      const heard = [];
+      const log = (/** @type {string} */ who) => (/** @type {any} */ e) => heard.push(`${who} ${e.type} ${e.focusVisible}`);
+      /** @type {any} */
+      const refs = {};
+      const root = Root({
+        id: shadow ? 'shade' : 'light',
+        target: t.container,
+        renderer: shadow ? $shadow({ mode: 'closed', styles: false }) : $dom(t.document),
+        children: () => (
+          <View onFocusIn={log('outer')}>
+            <Action ref={el => (refs.save = el)} text="save" onFocus={log('own')} />
+            <Action ref={el => (refs.next = el)} text="next" />
+          </View>
+        ),
+      });
+      const tag = shadow ? 'shadow' : 'light';
+      // The browser's answer as the focus moves: what a pointer press or a key made it.
+      let visible = false;
+      /** @type {string[]} */
+      const asked = [];
+      for (const el of [refs.save, refs.next]) {
+        const matches = el.matches;
+        el.matches = (/** @type {string} */ selector) => (selector === ':focus-visible' ? (asked.push(selector), visible) : matches.call(el, selector));
+      }
+      refs.save.focus();
+      assert.deepEqual(heard.splice(0), ['own focus false', 'outer focusin false'], `${tag}: a focus the browser shows no ring for`);
+      visible = true;
+      refs.next.focus();
+      assert.deepEqual(heard.splice(0), ['outer focusin true'], `${tag}: one it rings`);
+      assert.equal(asked.length > 0, true, `${tag}: it asked the browser`);
+      $dispose(root);
+    }
+  });
+
   it('sends blur and a bubbling focusout when it removes or hides the focused element, as ren-canv', () => {
     for (const shadow of [false, true]) {
       const t = setup();

@@ -564,6 +564,19 @@ const TYPED_INPUTS = ['text', 'search', 'email', 'url', 'tel', 'password', 'numb
 const FIELDS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 /** Whether a key's target is a text field (`$keys`' `editable`). @param {any} t */
 const field = t => t != null && (FIELDS.has(t.tagName) || t.isContentEditable === true);
+/**
+ * Whether a focused element shows its focus ring: the browser's
+ * `:focus-visible` (a focus and a focusin's `focusVisible`); true where
+ * the browser does not know the selector.
+ * @param {any} el
+ */
+const shows = el => {
+  try {
+    return el.matches(':focus-visible') === true;
+  } catch {
+    return true;
+  }
+};
 /** Whether `target` is `node` or holds it, across shadow roots. @param {any} target @param {any} node */
 const around = (target, node) => {
   for (let n = node; n != null; n = n.parentNode ?? n.host) if (n === target) return true;
@@ -2552,6 +2565,7 @@ function make(document, options, mode) {
     if (key === undefined) return;
     const top = e.currentTarget;
     const path = e.composedPath();
+    if (e.type === 'focusin') e.focusVisible = shows(path[0] ?? e.target);
     let i = 0;
     // A deeper root of this host (a portal's target inside the container)
     // walked the path below itself already; continue from it (a walk stops
@@ -3565,6 +3579,11 @@ function make(document, options, mode) {
       /** @param {any} e */
       let listener = handler;
       if (role === 'Edit' && name === 'change') listener = e => handler({ value: e.target.value, event: e });
+      else if (event === 'focus' || event === 'focusin')
+        listener = e => {
+          e.focusVisible = shows(e.composedPath()[0] ?? e.target);
+          handler(e);
+        };
       else if (role === 'Edit' && name === 'submit')
         listener = e => {
           if (e.key === 'Enter') handler({ value: e.target.value, event: e });

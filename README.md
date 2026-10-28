@@ -314,6 +314,11 @@ ren-canv: a wrapper hears the focus leave it. A hidden element hears its
 before it goes), though Chrome fires its blur. A node ren-dom moves (a keyed
 row) keeps the focus it holds: it moves with `moveBefore` where the browser
 has it, else the focused element takes the focus back once in place.
+A `focus` and a `focusin` carry ren-core's `focusVisible`: whether the
+focused element matches the browser's `:focus-visible` as the event
+fires (the keyboard gave the focus, or code moved it after a key and not
+after a pointer press; a text field always), so it agrees with the ring
+the sheet draws.
 
 On a primitive, `onDrop`, `onDragEnter`, `onDragOver` and `onDragLeave` are
 ren-core's portable ones, mapped from the DOM's own: a drop's `files` (its

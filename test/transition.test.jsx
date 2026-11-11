@@ -6,7 +6,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window as HappyWindow } from 'happy-dom';
 import { $root, $signal, $read, $write, $memo, $pending, $task } from 'rrx-core';
-import { Pending, For, $active, Root, Recover, Label, $settle } from 'ren-core';
+import { Pending, For, Show, $active, Root, Recover, Label, $settle } from 'ren-core';
 import { render } from 'ren-dom';
 
 /** The happy-dom windows this file's tests open, each closed after its test (its window.close() frees nothing). @type {HappyWindow[]} */
@@ -125,6 +125,36 @@ describe('ren dom transitions', () => {
     assert.equal(container.innerHTML, '<i>loading</i>', 'the key changed: the fallback, not the stale content');
     await answer(2, { name: 'grace' });
     assert.equal(container.innerHTML, '<h1>grace</h1>');
+  });
+
+  it('shows its content as it stands after a fallback cycle with Pending again', async () => {
+    const { container } = setup();
+    const root = $root('app');
+    const id = $signal(root, 1);
+    const on = $signal(root, false);
+    const items = $signal(root, ['a']);
+    const { data: user, answer } = fetcher(root, id);
+    render(() => (
+      <Pending again={() => $read(id)} fallback={<i>loading</i>}>
+        <Show when={on} fallback={<s>off</s>}><b>on</b></Show>
+        <h1>{() => $read(user).name}</h1>
+        <For each={items}>{item => <p>{item()}</p>}</For>
+      </Pending>
+    ), container, { root });
+    await answer(1, { name: 'ada' });
+    assert.equal(container.innerHTML, '<s>off</s><h1>ada</h1><p>a</p>');
+    // A top-level Show and For change while the content shows.
+    $write(on, true);
+    $write(items, ['b', 'c']);
+    assert.equal(container.innerHTML, '<b>on</b><h1>ada</h1><p>b</p><p>c</p>');
+    $write(id, 2);
+    assert.equal(container.innerHTML, '<i>loading</i>');
+    await answer(2, { name: 'grace' });
+    assert.equal(container.innerHTML, '<b>on</b><h1>grace</h1><p>b</p><p>c</p>', 'not what it first built');
+    // And they keep following their sources.
+    $write(on, false);
+    $write(items, ['d']);
+    assert.equal(container.innerHTML, '<s>off</s><h1>grace</h1><p>d</p>');
   });
 
   it('holds a list and its siblings while its items revalidate', () => {

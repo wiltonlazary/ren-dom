@@ -427,6 +427,31 @@ describe('ren dom', () => {
     assert.equal(layer.querySelectorAll('p').length, 0);
   });
 
+  it('closes a portal that starts with a list with every row the list showed later', () => {
+    const { container, document } = setup();
+    const root = $root('app');
+    const open = $signal(root, true);
+    const empty = $signal(root, /** @type {string[]} */ ([]));
+    const rows = $signal(root, ['a', 'b']);
+    const layer = document.createElement('section');
+    document.body.appendChild(layer);
+    render(() => (
+      <div>
+        <Show when={open}>
+          <Portal into={layer}><For each={empty}>{item => <p>{item()}</p>}</For></Portal>
+          <Portal into={layer}><For each={rows}>{item => <p>{item()}</p>}</For><i>end</i></Portal>
+        </Show>
+        <Portal into={layer}><b>other</b></Portal>
+      </div>
+    ), container, { root });
+    // A list that starts empty fills; one's first row is replaced.
+    $write(empty, ['x', 'y']);
+    $write(rows, ['c', 'b']);
+    assert.equal(layer.textContent, 'xycbendother');
+    $write(open, false);
+    assert.equal(layer.innerHTML, '<b>other</b>', 'no row stays in the layer');
+  });
+
   it('shows Pending until pending reads resolve, then keeps content', () => {
     const { container } = setup();
     const root = $root('app');
@@ -595,6 +620,23 @@ describe('ren dom', () => {
     assert.equal(container.innerHTML, '');
     assert.equal($stats(root).nodes, before, 'no node outlives the view');
     assert.equal($stats(root).effects, 0);
+  });
+
+  it('disposes a view with what its top-level regions and lists showed later', () => {
+    const { container } = setup();
+    const root = $root('app');
+    const on = $signal(root, false);
+    const items = $signal(root, /** @type {string[]} */ ([]));
+    const kept = container.ownerDocument.createElement('hr');
+    container.appendChild(kept);
+    const dispose = render(() => [<For each={items}>{item => <i>{item()}</i>}</For>, <Show when={on} fallback={<s>off</s>}><b>on</b></Show>, <For each={items}>{item => <u>{item()}</u>}</For>], container, { root });
+    // A Show swapped and two lists grown, at the view's start and end.
+    $write(on, true);
+    $write(items, ['a', 'b']);
+    assert.equal(container.innerHTML, '<hr><i>a</i><i>b</i><b>on</b><u>a</u><u>b</u>');
+    dispose();
+    assert.equal(container.innerHTML, '<hr>', 'only what the container held before stays');
+    assert.equal(container.childNodes.length, 1);
   });
 
   it('lets the nodes of removed initial rows and regions be collected', async () => {

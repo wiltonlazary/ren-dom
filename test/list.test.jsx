@@ -7,7 +7,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { $root, $signal, $read, $write, $stats, $cleanup, $owner } from 'rrx-core';
-import { For, Portal, $active } from 'ren-core';
+import { For, Times, Show, Portal, $active } from 'ren-core';
 import { render } from 'ren-dom';
 
 /** @type {any[]} */
@@ -300,5 +300,75 @@ describe('ren-core list reconciler', () => {
     $write(items, []);
     assert.equal(container.querySelector('ul').innerHTML, '');
     assert.equal(document.body.lastChild.textContent, 'outside');
+  });
+
+  it('keeps the rows a nested list adds later inside its outer row', () => {
+    const { container } = setup();
+    const root = $root('app');
+    const a = { name: 'a', items: $signal(root, /** @type {string[]} */ ([])) };
+    const b = { name: 'b', items: $signal(root, ['b1']) };
+    const groups = $signal(root, [a, b]);
+    render(() => (
+      <ul>
+        <For each={groups}>{group => <For each={group().items}>{item => <li>{item()}</li>}</For>}</For>
+      </ul>
+    ), container, { root });
+    const ul = container.querySelector('ul');
+    assert.equal(ul.innerHTML, '<li>b1</li>');
+    // Group a, empty when built, fills: its rows are its outer row's.
+    $write(a.items, ['a1', 'a2']);
+    assert.equal(ul.innerHTML, '<li>a1</li><li>a2</li><li>b1</li>');
+    $write(groups, [b, a]);
+    assert.equal(ul.innerHTML, '<li>b1</li><li>a1</li><li>a2</li>', 'a reorder moves them with their row');
+    $write(groups, [b]);
+    assert.equal(ul.innerHTML, '<li>b1</li>', 'a removal takes them');
+    $write(groups, []);
+    assert.equal(ul.innerHTML, '');
+  });
+
+  it('keeps the rows a Times in a row adds later inside that row', () => {
+    const { container } = setup();
+    const root = $root('app');
+    const a = { count: $signal(root, 0) };
+    const b = { count: $signal(root, 1) };
+    const groups = $signal(root, [a, b]);
+    render(() => (
+      <ul>
+        <For each={groups}>{group => <Times count={group().count}>{i => <li>{String(i)}</li>}</Times>}</For>
+      </ul>
+    ), container, { root });
+    const ul = container.querySelector('ul');
+    $write(a.count, 2);
+    assert.equal(ul.textContent, '010');
+    $write(groups, [b, a]);
+    assert.equal(ul.textContent, '001');
+    $write(groups, [b]);
+    assert.equal(ul.textContent, '0');
+  });
+
+  it('removes a fallback whose content changed with everything it shows', () => {
+    const { container } = setup();
+    const root = $root('app');
+    const items = $signal(root, /** @type {string[]} */ ([]));
+    const more = $signal(root, false);
+    const hints = $signal(root, /** @type {string[]} */ ([]));
+    render(() => (
+      <ul>
+        <li>first</li>
+        <For each={items} fallback={[<Show when={more}><li>more</li></Show>, <For each={hints}>{hint => <li>{hint()}</li>}</For>]}>{item => <li>{item()}</li>}</For>
+        <li>last</li>
+      </ul>
+    ), container, { root });
+    const ul = container.querySelector('ul');
+    const text = () => [...ul.children].map(li => li.textContent).join();
+    assert.equal(text(), 'first,last');
+    // The fallback's own regions change while it shows.
+    $write(more, true);
+    $write(hints, ['h1', 'h2']);
+    assert.equal(text(), 'first,more,h1,h2,last');
+    $write(items, ['a']);
+    assert.equal(text(), 'first,a,last', 'the rows replace all of it');
+    $write(items, []);
+    assert.equal(text(), 'first,more,h1,h2,last', 'built again as it is now');
   });
 });

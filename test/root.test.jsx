@@ -107,6 +107,55 @@ describe('ren-core roots', () => {
     assert.deepEqual($roots(document), []);
   });
 
+  it('keeps a live root whole when its renderer refuses a second root', () => {
+    const { page, document } = setup();
+    for (const renderer of [$dom(document), $shadow()]) {
+      const first = Root({ id: 'first', target: page, renderer, storage: null, locks: null, children: () => <p>one</p> });
+      const host = page.lastChild;
+      const view = host.shadowRoot ?? host;
+      assert.throws(() => Root({ id: 'second', target: page, renderer, storage: null, locks: null, children: () => <p>two</p> }), /a renderer serves one root; make one per root/);
+      assert.equal(view.querySelector('p').textContent, 'one', 'its view stays');
+      assert.equal(host.getAttribute('data-ren-root'), 'first');
+      assert.deepEqual($roots(document), ['first'], 'the refused id is free');
+      assert.equal(page.children.length, 1, 'the refused root left no host element');
+      $dispose(first);
+      assert.equal(page.children.length, 0);
+    }
+  });
+
+  it('refuses a new row whose nested root takes the id of a row leaving in the same update; rows keyed by the id keep theirs', () => {
+    const { page, document } = setup();
+    /** @type {any} */
+    let rows;
+    /** @type {any} */
+    let keyed;
+    const App = () => {
+      rows = $signal($active(), [{ id: 'a' }, { id: 'b' }]);
+      keyed = $signal($active(), [{ id: 'k' }]);
+      return (
+        <ul>
+          <For each={rows}>{row => <li><Root id={row().id} storage={null} locks={null}>{() => <b>{row().id}</b>}</Root></li>}</For>
+          <For each={keyed} by={row => row.id}>{row => <li><Root id={row().id} storage={null} locks={null}>{() => <b>{row().id}</b>}</Root></li>}</For>
+        </ul>
+      );
+    };
+    const root = Root({ id: 'app', target: page, renderer: $dom(document), storage: null, locks: null, children: () => <App /> });
+    const shown = () => [...page.querySelectorAll('b')].map(b => b.textContent).join();
+    // A refetch: new items of the same ids. Keyed by the item, every row is new, and built before the old ones leave.
+    assert.throws(() => $write(rows, [{ id: 'a' }, { id: 'b' }, { id: 'c' }]), /REN: a root "a" is already live in this document/);
+    assert.equal(shown(), 'a,b,k', 'the update fails whole: the list keeps its rows');
+    assert.deepEqual($roots(document), ['app', 'a', 'b', 'k']);
+    // Keyed by the id, a refetched item keeps its row and its root.
+    $write(keyed, [{ id: 'k' }, { id: 'l' }]);
+    assert.equal(shown(), 'a,b,k,l');
+    // An id a row gave up in an earlier update is free.
+    $write(rows, [{ id: 'c' }]);
+    $write(rows, [{ id: 'a' }]);
+    assert.equal(shown(), 'a,k,l');
+    $dispose(root);
+    assert.deepEqual($roots(document), []);
+  });
+
   it('refuses a duplicate live id per document, and frees it on dispose', () => {
     const one = setup();
     const two = setup();

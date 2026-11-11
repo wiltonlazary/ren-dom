@@ -365,7 +365,10 @@ number: none), so the browser makes a View, Layout or Scroll with one
 focusable and keeps one of -1 out of the Tab order; `inert` is the
 `inert` attribute while true, so the browser keeps the focus, the pointer,
 selection and the accessibility tree from the region, and ren-core's
-`$focus` (`focusables`) passes it by.
+`$focus` (`focusables`) passes it by. `scripts/focus-check.mjs` checks
+`focusables` in Chrome against the elements Tab and Shift+Tab stop at, at
+every edge the list knows (disabled, hidden, inert, a disabled fieldset,
+hidden visibility, editable elements, a details' summaries).
 
 A primitive's `dir` ('ltr', 'rtl', 'auto') is its `dir` attribute (unset:
 none, its parent's), so the browser sets its text and lays it out in that
